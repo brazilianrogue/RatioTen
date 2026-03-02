@@ -17,24 +17,28 @@ st.markdown("""
     .stMetric {
         background-color: #31333F;
         color: white !important;
-        padding: 10px;
+        padding: 10px !important;
         border-radius: 8px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        min-height: 100px; /* Equalizes card height */
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
     }
     .stMetric [data-testid="stMetricValue"] {
         color: white !important;
-        font-size: 1.5rem !important;
+        font-size: 1.2rem !important; /* Slightly smaller for mobile */
     }
     .stMetric [data-testid="stMetricLabel"] {
         color: #e0e0e0 !important;
-        font-size: 0.8rem !important;
+        font-size: 0.7rem !important;
     }
     .stMetric [data-testid="stMetricDelta"] {
-        font-size: 0.8rem !important;
+        font-size: 0.7rem !important;
     }
     div[data-testid="column"] {
-        padding: 0 5px !important;
-        flex: 1 1 0% !important;
+        padding: 0 2px !important;
+        flex: 1 1 30% !important; /* Compresses cards */
         min-width: 0 !important;
     }
     [data-testid="stMetricValue"] {
@@ -43,6 +47,7 @@ st.markdown("""
     div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         flex-wrap: nowrap !important;
+        gap: 5px !important;
     }
     div[data-testid="stExpander"] {
         border: none !important;
