@@ -7,7 +7,7 @@ import json
 import re
 
 # --- 1. Page Configuration & Custom CSS ---
-st.set_page_config(page_title="Nutrition Tracker", page_icon="🍏", layout="centered")
+st.set_page_config(page_title="RatioTen", page_icon="🔟", layout="centered")
 
 st.markdown("""
     <style>
@@ -68,7 +68,7 @@ st.markdown("""
         border-radius: 4px;
         font-weight: 600;
     }
-    .delta-green { background-color: rgba(40, 167, 69, 0.2); color: #28a745; }
+    .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
     .stButton button {
         border-radius: 20px;
@@ -144,8 +144,8 @@ def log_to_sheet(item, calories, protein, density):
 
 # --- 3. System Prompt (The Rules Engine) ---
 SYSTEM_PROMPT = """
-You are a highly capable, supportive nutrition tracker.
-Primary Quality Metric: Protein Density.
+You are the RatioTen Assistant, a precise, analytical, and highly supportive nutrition tracker.
+Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
 - For example: an item with 150 calories and 30g protein has a density of 30 / 150 = 0.20 = 20.0%.
 
@@ -192,7 +192,11 @@ JSON Output for Database Logging:
 
 # --- 4. Sidebar & Profile ---
 with st.sidebar:
-    st.header("⚙️ Protocol & Goals")
+    try:
+        st.image("logo.png", use_container_width=True)
+    except:
+        pass
+    st.header("⚙️ RatioTen Protocol")
     st.info("""
     **Standard Protocol:**
     18:6 Fast (12PM - 6PM)
@@ -208,7 +212,7 @@ with st.sidebar:
     """)
 
 # --- 4. Modernized Header & Dashboard ---
-st.markdown("### 🍏 **Nutrition** & Fasting")
+st.markdown("### **Ratio**<span style='color:#00A6FF'>Ten</span>", unsafe_allow_html=True)
 
 df_7days = get_trailing_7_days_data()
 
