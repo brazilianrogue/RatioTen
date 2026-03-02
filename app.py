@@ -3,8 +3,11 @@ from google import genai
 import gspread
 import pandas as pd
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import json
 import re
+
+EASTERN = ZoneInfo("America/New_York")
 
 # --- 1. Page Configuration & Custom CSS ---
 st.set_page_config(page_title="RatioTen", page_icon="🔟", layout="centered")
@@ -112,7 +115,7 @@ def get_trailing_7_days_data():
         df['Calories'] = pd.to_numeric(df['Calories'], errors='coerce').fillna(0)
         df['Protein'] = pd.to_numeric(df['Protein'], errors='coerce').fillna(0)
         
-        seven_days_ago = (datetime.now() - timedelta(days=7)).date()
+        seven_days_ago = (datetime.now(EASTERN) - timedelta(days=7)).date()
         df = df[df['Date'] >= seven_days_ago]
         
         if df.empty:
@@ -149,13 +152,78 @@ def get_lowest_weight():
     except Exception as e:
         return None
 
+@st.cache_data(ttl=600)
+def get_fasting_schedule():
+    default_schedule = {
+        "Monday": {"start": None, "end": None},
+        "Tuesday": {"start": "12:00", "end": "18:00"},
+        "Wednesday": {"start": "12:00", "end": "18:00"},
+        "Thursday": {"start": "12:00", "end": "18:00"},
+        "Friday": {"start": "18:00", "end": "19:00"},
+        "Saturday": {"start": "12:00", "end": "18:00"},
+        "Sunday": {"start": "12:00", "end": "18:00"}
+    }
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet("Fasting_Schedule")
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title="Fasting_Schedule", rows="10", cols="3")
+            worksheet.append_row(["DayOfWeek", "WindowStart", "WindowEnd"])
+            for day, times in default_schedule.items():
+                worksheet.append_row([day, times["start"] or "Skip", times["end"] or "Skip"])
+            return default_schedule
+            
+        data = worksheet.get_all_records()
+        if not data: return default_schedule
+            
+        schedule = {}
+        for row in data:
+            day = row.get("DayOfWeek")
+            start = str(row.get("WindowStart", "")).strip()
+            end = str(row.get("WindowEnd", "")).strip()
+            if start.lower() in ["skip", "none", ""]: start = None
+            if end.lower() in ["skip", "none", ""]: end = None
+            schedule[day] = {"start": start, "end": end}
+        return schedule
+    except Exception as e:
+        return default_schedule
+
+def get_fasting_status(schedule):
+    now = datetime.now(EASTERN)
+    day_name = now.strftime("%A")
+    today_sched = schedule.get(day_name, {"start": None, "end": None})
+    
+    if today_sched["start"] and today_sched["end"]:
+        start_time = datetime.strptime(today_sched["start"], "%H:%M").time()
+        end_time = datetime.strptime(today_sched["end"], "%H:%M").time()
+        current_time = now.time()
+        
+        if start_time <= current_time < end_time:
+            end_dt = datetime.combine(now.date(), end_time, tzinfo=EASTERN)
+            return "Eating Window Active", end_dt.timestamp() * 1000
+
+    for i in range(8):
+        check_date = now + timedelta(days=i)
+        check_day = check_date.strftime("%A")
+        sched = schedule.get(check_day, {"start": None, "end": None})
+        if sched["start"]:
+            start_time = datetime.strptime(sched["start"], "%H:%M").time()
+            start_dt = datetime.combine(check_date.date(), start_time, tzinfo=EASTERN)
+            if start_dt > now:
+                return "Fasting Active", start_dt.timestamp() * 1000
+    
+    return "No Schedule", None
+
 def log_to_sheet(item, calories, protein, density):
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.sheet1
-        today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        today = datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M:%S")
         worksheet.append_row([today, item, calories, protein, density])
         return True
     except Exception as e:
@@ -163,16 +231,17 @@ def log_to_sheet(item, calories, protein, density):
         return False
 
 # --- 3. System Prompt (The Rules Engine) ---
-SYSTEM_PROMPT = """
+def get_system_prompt(schedule):
+    formatted_schedule = "\n".join([f"- {day}: {times['start']} to {times['end']}" if times['start'] else f"- {day}: Fasting / Skip" for day, times in schedule.items()])
+    return f"""
 You are the RatioTen Assistant, a precise, analytical, and highly supportive nutrition tracker.
 Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
 - For example: an item with 150 calories and 30g protein has a density of 30 / 150 = 0.20 = 20.0%.
 
 Fasting Protocol Strict Adherence:
-- Standard: 18-6 Intermittent Fasting (Eating window 12:00 PM to 6:00 PM).
-- Monday "Skip Day": 42-hour fast (Stop eating Sunday 6:00 PM, resume Tuesday 12:00 PM).
-- Friday OMAD: One Meal a Day at exactly 6:00 PM.
+Here is the user's current fasting schedule (UTC-5 Eastern Time):
+{formatted_schedule}
 
 Multimodal Capabilities (Image Analysis):
 - You can identify food items and estimate portion sizes from images.
@@ -210,6 +279,9 @@ JSON Output for Database Logging:
 - Only include the JSON block if new food is being logged.
 """
 
+fasting_schedule = get_fasting_schedule()
+SYSTEM_PROMPT = get_system_prompt(fasting_schedule)
+
 # --- 4. Sidebar & Profile ---
 with st.sidebar:
     try:
@@ -234,10 +306,55 @@ with st.sidebar:
 # --- 4. Modernized Header & Dashboard ---
 st.markdown("### **Ratio**<span style='color:#00A6FF'>Ten</span>", unsafe_allow_html=True)
 
+# Animated Fasting Timer
+status, target_timestamp = get_fasting_status(fasting_schedule)
+timer_html = f"""
+<div style="background-color: #31333F; color: white; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <div style="font-size: 0.9rem; color: #e0e0e0; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;">{status}</div>
+    <div id="countdown-timer" style="font-size: 1.8rem; font-weight: 700; color: #00A6FF; font-variant-numeric: tabular-nums;">--:--:--</div>
+</div>
+<script>
+(function() {{
+    const targetTime = {target_timestamp if target_timestamp else 'null'};
+    const timerElement = window.parent.document.getElementById('countdown-timer') || document.getElementById('countdown-timer');
+    
+    function updateTimer() {{
+        if (!targetTime) {{
+            if(timerElement) timerElement.innerHTML = "No upcoming window";
+            return;
+        }}
+        
+        const now = new Date().getTime();
+        const difference = targetTime - now;
+        
+        if (difference <= 0) {{
+            if(timerElement) timerElement.innerHTML = "00:00:00";
+            return;
+        }}
+        
+        const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+        
+        if(timerElement) {{
+            timerElement.innerHTML = 
+                String(hours).padStart(2, '0') + ":" + 
+                String(minutes).padStart(2, '0') + ":" + 
+                String(seconds).padStart(2, '0');
+        }}
+    }}
+    
+    updateTimer();
+    setInterval(updateTimer, 1000);
+}})();
+</script>
+"""
+st.components.v1.html(timer_html, height=120)
+
 df_7days = get_trailing_7_days_data()
 
 # Calculate today's metrics
-today_str = datetime.now().strftime("%Y-%m-%d")
+today_str = datetime.now(EASTERN).strftime("%Y-%m-%d")
 today_data = df_7days[df_7days['Date'] == today_str]
 
 if not today_data.empty:
