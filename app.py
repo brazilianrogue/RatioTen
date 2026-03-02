@@ -273,7 +273,7 @@ JSON Output for Database Logging:
 - Format exactly like this:
 ```json
 [
-  {"item": "Food Name", "calories": 150, "protein": 30, "density": "20.0%"}
+  {{"item": "Food Name", "calories": 150, "protein": 30, "density": "20.0%"}}
 ]
 ```
 - Only include the JSON block if new food is being logged.
