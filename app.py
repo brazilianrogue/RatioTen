@@ -91,6 +91,12 @@ Fasting Protocol Strict Adherence:
 - Monday "Skip Day": 42-hour fast (Stop eating Sunday 6:00 PM, resume Tuesday 12:00 PM).
 - Friday OMAD: One Meal a Day at exactly 6:00 PM.
 
+Multimodal Capabilities (Image Analysis):
+- You can identify food items and estimate portion sizes from images.
+- Nutritional Labels: When a nutritional label is provided in an image, you MUST parse the calories and protein from the label. These values should ALWAYS be used as the source of truth, rather than an estimated or researched value.
+- User Adjustments: Always take into account additional user input that might adjust the value (e.g., "Ate half of this" means you should divide the label's total calories and protein by two).
+- Assistance in Calorie Reduction: Identify individual parts of the meal that can be left uneaten or removed to help reach daily goals or stay within daily limits. Suggest what to leave behind to optimize macro ratios.
+
 Formatting Constraints (Mobile Optimized):
 - Use standard, properly formatted Markdown tables (which Streamlit renders as nice HTML tables). Do not use raw ASCII formatting.
 - The "Density" column must always be displayed as a percentage with exactly one decimal place (e.g., 11.5%, 5.0%, 12.3%).
@@ -152,21 +158,44 @@ if "chat_session" not in st.session_state:
 # Display previous chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        content = message["content"]
+        if isinstance(content, list):
+            for item in content:
+                st.write(item)
+        else:
+            st.markdown(content)
 
-# --- 6. Chat Input & AI Processing ---
+# --- 6. Chat Input & Camera Support ---
+camera_image = st.camera_input("Take a picture of your meal")
 user_input = st.chat_input("Log a meal or ask a question...")
 
-if user_input:
-    # 1. Show user message in the UI
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    st.session_state.messages.append({"role": "user", "content": user_input})
+if user_input or camera_image:
+    # 1. Prepare segments for UI and Gemini
+    message_content = []
+    ui_content = []
     
-    # 2. Send message to Gemini and get response
+    if camera_image:
+        img_bytes = camera_image.getvalue()
+        message_content.append(genai.types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
+        ui_content.append("📷 *Photo attached*")
+        
+    if user_input:
+        message_content.append(user_input)
+        ui_content.append(user_input)
+    
+    # Show user message in the UI
+    with st.chat_message("user"):
+        for item in ui_content:
+            st.write(item)
+            if item == "📷 *Photo attached*":
+                st.image(camera_image)
+    
+    st.session_state.messages.append({"role": "user", "content": ui_content})
+    
+    # 2. Send message (text + image) to Gemini and get response
     with st.chat_message("assistant"):
-        with st.spinner("Calculating macros..."):
-            response = st.session_state.chat_session.send_message(user_input)
+        with st.spinner("Analyzing meal..."):
+            response = st.session_state.chat_session.send_message(message_content)
             
             # Remove JSON block from the displayed text so the user doesn't see it
             display_text = re.sub(r'```json\n.*?\n```', '', response.text, flags=re.DOTALL).strip()
