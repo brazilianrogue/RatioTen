@@ -14,54 +14,62 @@ st.markdown("""
     .main {
         background-color: #f8f9fa;
     }
-    .stMetric {
-        background-color: #31333F;
-        color: white !important;
-        padding: 5px !important;
-        border-radius: 8px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        min-height: 90px;
-        display: flex !important;
-        flex-direction: column !important;
-        justify-content: flex-start !important;
-        align-items: flex-start !important;
-    }
-    .stMetric [data-testid="stMetricValue"] {
-        color: white !important;
-        font-size: 1rem !important;
-        line-height: 1 !important;
-    }
-    .stMetric [data-testid="stMetricLabel"] {
-        color: #e0e0e0 !important;
-        font-size: 0.65rem !important;
-        margin-bottom: 2px !important;
-    }
-    .stMetric [data-testid="stMetricDelta"] {
-        font-size: 0.65rem !important;
-        line-height: 1 !important;
-    }
-    /* Force 3-column row on small screens */
-    div[data-testid="stHorizontalBlock"] {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        justify-content: space-between !important;
-        align-items: flex-start !important;
-        gap: 4px !important;
-    }
-    div[data-testid="column"] {
-        width: 32% !important;
-        flex: 0 0 32% !important;
-        min-width: 0 !important;
-    }
-    [data-testid="stMetricValue"] {
-        overflow-wrap: anywhere !important;
-    }
     div[data-testid="stExpander"] {
         border: none !important;
         box-shadow: none !important;
         background-color: transparent !important;
     }
+    .stButton button {
+        border-radius: 20px;
+        font-weight: 600;
+    }
+    header[data-testid="stHeader"] {
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(10px);
+    }
+    /* Custom Dashboard CSS */
+    .metric-container {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 20px;
+    }
+    .metric-card {
+        background-color: #31333F;
+        color: white;
+        padding: 12px 8px;
+        border-radius: 10px;
+        flex: 1;
+        min-width: 0;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: flex-start;
+        height: 100px;
+    }
+    .metric-label {
+        font-size: 0.75rem;
+        color: #e0e0e0;
+        margin-bottom: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        width: 100%;
+    }
+    .metric-value {
+        font-size: 1.2rem;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+    .metric-delta {
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+    .delta-green { background-color: rgba(40, 167, 69, 0.2); color: #28a745; }
+    .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
     .stButton button {
         border-radius: 20px;
         font-weight: 600;
@@ -215,11 +223,31 @@ if not today_data.empty:
 else:
     cals, protein, density = 0, 0, "0.0%"
 
-# Metric Row
-m1, m2, m3 = st.columns(3)
-m1.metric("Calories", f"{cals}", f"{1500 - cals} left" if cals < 1500 else f"+{cals - 1500} over", delta_color="inverse")
-m2.metric("Protein", f"{protein}g", f"{protein - 150}g" if protein >= 150 else f"{protein - 150}g", delta_color="normal")
-m3.metric("Density", density, delta=None)
+# Metric Row (Custom HTML/CSS for reliable 3-wide mobile layout)
+metric_html = f"""
+<div class="metric-container">
+    <div class="metric-card">
+        <div class="metric-label">Calories</div>
+        <div class="metric-value">{cals}</div>
+        <div class="metric-delta {'delta-green' if cals <= 1500 else 'delta-red'}">
+            {f'↑ {1500 - cals} left' if cals <= 1500 else f'↓ {cals - 1500} over'}
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Protein</div>
+        <div class="metric-value">{protein}g</div>
+        <div class="metric-delta {'delta-green' if protein >= 150 else 'delta-red'}">
+            {f'↑ {protein - 150}g' if protein >= 150 else f'↓ {150 - protein}g left'}
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Density</div>
+        <div class="metric-value">{density}</div>
+        <div class="metric-delta delta-green">Target: 10%</div>
+    </div>
+</div>
+"""
+st.markdown(metric_html, unsafe_allow_html=True)
 
 # Collapsible Weekly History
 with st.expander("📊 Weekly History", expanded=False):
