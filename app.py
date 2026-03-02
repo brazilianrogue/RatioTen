@@ -1,22 +1,20 @@
 import streamlit as st
 from google import genai
-
-# --- 1. Page Configuration ---
-st.set_page_config(page_title="Nutrition Tracker", page_icon="🍏", layout="centered")
-
-# --- 2. API Setup ---
-# This securely pulls your API key from the .streamlit/secrets.toml file
-@st.cache_resource
-def get_client():
-    return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-
-client = get_client()
-
 import gspread
 import pandas as pd
 from datetime import datetime, timedelta
 import json
 import re
+
+# --- 1. Page Configuration ---
+st.set_page_config(page_title="Nutrition Tracker", page_icon="🍏", layout="centered")
+
+# --- 2. API Setup ---
+@st.cache_resource
+def get_client():
+    return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+client = get_client()
 
 # --- Database Setup ---
 @st.cache_data(ttl=60)
@@ -61,18 +59,11 @@ def get_trailing_7_days_data():
 
 def log_to_sheet(item, calories, protein, density):
     try:
-        # Authenticate using the secrets
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
-        
-        # Open the specific sheet by its exact name
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.sheet1
-        
-        # Silently track the date in the background
         today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Append the data as a new row
         worksheet.append_row([today, item, calories, protein, density])
         return True
     except Exception as e:
@@ -127,8 +118,6 @@ JSON Output for Database Logging:
 - Only include the JSON block if new food is being logged.
 """
 
-# We will pass the system instruction directly when starting the chat session
-
 # --- 4. UI Header & Dashboard ---
 st.title("Nutrition & Fasting Tracker")
 st.caption("AI-Powered Logging & Protein Density Engine")
@@ -142,8 +131,12 @@ else:
 
 st.divider()
 
-# --- 5. Initialize Chat History ---
-# We store both the UI messages and the Gemini memory in the session state
+# --- 5. Initialize Chat History & Session State ---
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Ready to log. What are we eating?"}
+    ]
+
 if "chat_session" not in st.session_state:
     st.session_state.chat_session = client.chats.create(
         model="gemini-3-flash-preview",
@@ -151,9 +144,12 @@ if "chat_session" not in st.session_state:
             system_instruction=SYSTEM_PROMPT,
         )
     )
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Ready to log. What are we eating?"}
-    ]
+
+if "show_camera" not in st.session_state:
+    st.session_state.show_camera = False
+
+if "pending_image" not in st.session_state:
+    st.session_state.pending_image = None
 
 # Display previous chat messages
 for message in st.session_state.messages:
@@ -166,29 +162,40 @@ for message in st.session_state.messages:
             st.markdown(content)
 
 # --- 6. Chat Input & Camera Support ---
-camera_image = st.camera_input("Take a picture of your meal")
-user_input = st.chat_input("Log a meal or ask a question...")
+col1, col2 = st.columns([1, 4])
+with col1:
+    if st.button("📷 Photo"):
+        st.session_state.show_camera = not st.session_state.show_camera
 
-if user_input or camera_image:
+if st.session_state.show_camera:
+    captured_file = st.camera_input("Capture your meal")
+    if captured_file:
+        st.session_state.pending_image = captured_file.getvalue()
+        st.success("Photo captured! Now add a description below to submit.")
+
+user_input = st.chat_input("Describe your meal...")
+
+if user_input:
     # 1. Prepare segments for UI and Gemini
     message_content = []
     ui_content = []
     
-    if camera_image:
-        img_bytes = camera_image.getvalue()
-        message_content.append(genai.types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
+    # Check for pending image in session state
+    image_to_send = st.session_state.pending_image
+    
+    if image_to_send:
+        message_content.append(genai.types.Part.from_bytes(data=image_to_send, mime_type="image/jpeg"))
         ui_content.append("📷 *Photo attached*")
         
-    if user_input:
-        message_content.append(user_input)
-        ui_content.append(user_input)
+    message_content.append(user_input)
+    ui_content.append(user_input)
     
     # Show user message in the UI
     with st.chat_message("user"):
         for item in ui_content:
             st.write(item)
-            if item == "📷 *Photo attached*":
-                st.image(camera_image)
+            if item == "📷 *Photo attached*" and image_to_send:
+                st.image(image_to_send)
     
     st.session_state.messages.append({"role": "user", "content": ui_content})
     
@@ -220,4 +227,8 @@ if user_input or camera_image:
             
             if logged_something:
                 get_trailing_7_days_data.clear()
-                st.rerun()
+            
+            # Reset camera and pending image after successful submission
+            st.session_state.pending_image = None
+            st.session_state.show_camera = False
+            st.rerun()
