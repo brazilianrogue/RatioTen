@@ -365,7 +365,7 @@ timer_html = f"""
     
     updateTimer();
     setInterval(updateTimer, 1000);
-}} domestic)();
+}})();
 </script>
 """
 st.components.v1.html(timer_html, height=120)
@@ -416,7 +416,7 @@ lowest_w = get_lowest_weight()
 if lowest_w:
     st.markdown(f"""
     <div style="background-color: #31333F; color: #00A6FF; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 20px; font-weight: bold; border: 1px solid #00A6FF;">
-        🌟 Record Lowest Weight: {lowest_w} lbs
+        🌟 Record Lowest Weight: {lowest_w:.1f} lbs
     </div>
     """, unsafe_allow_html=True)
 
