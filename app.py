@@ -16,6 +16,40 @@ STABLE_MODEL = "gemini-2.0-flash"
 # --- 1. Page Configuration & Custom CSS ---
 st.set_page_config(page_title="RatioTen", page_icon="🔟", layout="centered")
 
+# --- Initialize Session State ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "current_model" not in st.session_state:
+    st.session_state.current_model = PRIMARY_MODEL
+
+if "show_camera" not in st.session_state:
+    st.session_state.show_camera = False
+
+if "pending_image" not in st.session_state:
+    st.session_state.pending_image = None
+
+# --- Function Definitions ---
+@st.cache_resource
+def get_chat_session(model_id, history=None):
+    # Determine the best thinking configuration for the model
+    config_params = {"system_instruction": SYSTEM_PROMPT}
+
+    # gemini-3 and gemini-2.5 support thinking configs in this environment
+    if "2.5" in model_id or "3" in model_id:
+        try:
+            config_params["thinking_config"] = genai.types.ThinkingConfig(include_thoughts=True)
+        except:
+            # Fallback for unexpected SDK versioning
+            pass
+
+    config = genai.types.GenerateContentConfig(**config_params)
+    return client.chats.create(
+        model=model_id,
+        config=config,
+        history=history
+    )
+
 st.markdown("""
     <style>
     .main {
@@ -430,6 +464,24 @@ with st.sidebar:
     - Protein: >= 150g
     - Density: >= 10.0%
     """)
+    st.divider()
+    st.subheader("📷 Meal Capture")
+    if st.button("📷 Open Camera", use_container_width=True):
+        st.session_state.show_camera = not st.session_state.show_camera
+    
+    if st.session_state.show_camera:
+        captured_file = st.camera_input("Capture your meal")
+        if captured_file:
+            st.session_state.pending_image = captured_file.getvalue()
+            st.success("Photo attached!")
+    
+    if st.session_state.pending_image:
+        st.info("✅ Image ready to send")
+        if st.button("🗑️ Discard Photo", use_container_width=True):
+            st.session_state.pending_image = None
+            st.rerun()
+
+    st.divider()
     if st.button("🗑️ Clear Chat History", help="Permanently clear the persistent thread from Google Sheets"):
         if clear_persistent_chat():
             st.session_state.messages = [{"role": "assistant", "content": "Thread cleared. Ready to start fresh!"}]
@@ -545,7 +597,7 @@ with st.expander("📊 Weekly History", expanded=False):
 st.divider()
 
 # --- 5. Initialize Chat History & Session State ---
-if "messages" not in st.session_state:
+if "messages" not in st.session_state or not st.session_state.messages:
     with st.spinner("Syncing history from cloud..."):
         persistent_history = get_persistent_chat()
         if persistent_history:
@@ -555,37 +607,8 @@ if "messages" not in st.session_state:
                 {"role": "assistant", "content": "Ready to log. What are we eating?"}
             ]
 
-@st.cache_resource
-def get_chat_session(model_id, history=None):
-    # Determine the best thinking configuration for the model
-    config_params = {"system_instruction": SYSTEM_PROMPT}
-
-    # gemini-3 and gemini-2.5 support thinking configs in this environment
-    if "2.5" in model_id or "3" in model_id:
-        try:
-            config_params["thinking_config"] = genai.types.ThinkingConfig(include_thoughts=True)
-        except:
-            # Fallback for unexpected SDK versioning
-            pass
-
-    config = genai.types.GenerateContentConfig(**config_params)
-    return client.chats.create(
-        model=model_id,
-        config=config,
-        history=history
-    )
-
-if "current_model" not in st.session_state:
-    st.session_state.current_model = PRIMARY_MODEL
-
 if "chat_session" not in st.session_state:
     st.session_state.chat_session = get_chat_session(st.session_state.current_model)
-
-if "show_camera" not in st.session_state:
-    st.session_state.show_camera = False
-
-if "pending_image" not in st.session_state:
-    st.session_state.pending_image = None
 
 # Display previous chat messages
 for message in st.session_state.messages:
@@ -597,17 +620,14 @@ for message in st.session_state.messages:
         else:
             st.markdown(content)
 
-# --- 6. Chat Input & Camera Support ---
-col1, col2 = st.columns([1, 4])
-with col1:
-    if st.button("📷 Photo"):
-        st.session_state.show_camera = not st.session_state.show_camera
-
-if st.session_state.show_camera:
-    captured_file = st.camera_input("Capture your meal")
-    if captured_file:
-        st.session_state.pending_image = captured_file.getvalue()
-        st.success("Photo captured! Now add a description below to submit.")
+# --- 6. Chat Input Support ---
+# Status indicator for pending image
+if st.session_state.pending_image:
+    st.markdown("""
+    <div style="background-color: #1E3A5F; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #00A6FF;">
+        📷 <b>Photo Attached:</b> Describing your meal below will submit both the text and the photo.
+    </div>
+    """, unsafe_allow_html=True)
 
 user_input = st.chat_input("Describe your meal...")
 
