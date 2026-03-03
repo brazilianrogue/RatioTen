@@ -320,14 +320,44 @@ def clear_persistent_chat():
     except:
         return False
 
+@st.cache_data(ttl=300)
+def get_custom_instructions():
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet("Custom_Instructions")
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title="Custom_Instructions", rows="100", cols="2")
+            worksheet.append_row(["Label", "Instructions"])
+            worksheet.append_row(["Static Food Items", "Add specific food data here to persist forever."])
+            return ""
+            
+        data = worksheet.get_all_values()
+        if len(data) <= 1: return ""
+        
+        instructions = []
+        for row in data[1:]:
+            if len(row) >= 2:
+                label, content = row
+                if content.strip():
+                    instructions.append(f"### {label}\n{content}")
+        return "\n\n".join(instructions)
+    except:
+        return ""
+
 # --- 3. System Prompt (The Rules Engine) ---
-def get_system_prompt(schedule):
+def get_system_prompt(schedule, custom_instructions=""):
     formatted_schedule = "\n".join([f"- {day}: {times['start']} to {times['end']}" if times['start'] else f"- {day}: Fasting / Skip" for day, times in schedule.items()])
     return f"""
 You are the RatioTen Assistant, a precise, analytical, and highly supportive nutrition tracker.
 Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
 - For example: an item with 150 calories and 30g protein has a density of 30 / 150 = 0.20 = 20.0%.
+
+Remote Custom Instructions (Source of Truth):
+{custom_instructions}
 
 Fasting Protocol Strict Adherence:
 Here is the user's current fasting schedule (UTC-5 Eastern Time):
@@ -370,7 +400,8 @@ JSON Output for Database Logging:
 """
 
 fasting_schedule = get_fasting_schedule()
-SYSTEM_PROMPT = get_system_prompt(fasting_schedule)
+custom_instructions = get_custom_instructions()
+SYSTEM_PROMPT = get_system_prompt(fasting_schedule, custom_instructions)
 
 # --- 4. Sidebar & Profile ---
 with st.sidebar:
