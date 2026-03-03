@@ -734,9 +734,10 @@ if st.session_state.view_selection == "🍽️ Log":
                     display_text = re.sub(r'```json\n.*?\n```', '', response.text, flags=re.DOTALL).strip()
                     
                     # Thoughts/Chain-of-thought support
-                    if response.candidates and response.candidates[0].thought:
+                    thought = getattr(response.candidates[0], "thought", None) if response.candidates else None
+                    if thought:
                         with st.expander("💭 Thinking Process", expanded=False):
-                            st.markdown(response.candidates[0].thought)
+                            st.markdown(thought)
                     
                     st.markdown(display_text)
                     
