@@ -9,8 +9,9 @@ import re
 import time
 
 EASTERN = ZoneInfo("America/New_York")
-PRIMARY_MODEL = "gemini-2.0-flash-thinking-exp-01-21"
-FALLBACK_MODEL = "gemini-2.0-flash"
+PRIMARY_MODEL = "gemini-3-pro-preview"
+SECONDARY_MODEL = "gemini-2.5-flash"
+STABLE_MODEL = "gemini-2.0-flash"
 
 # --- 1. Page Configuration & Custom CSS ---
 st.set_page_config(page_title="RatioTen", page_icon="🔟", layout="centered")
@@ -436,12 +437,18 @@ if "messages" not in st.session_state:
 
 @st.cache_resource
 def get_chat_session(model_id):
-    # Using the Thinking model config to replicate iOS app experience
-    config = genai.types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-    )
-    # Note: For Thinking models specifically, we want to ensure the assistant 
-    # takes advantage of the reasoning capabilities.
+    # Determine the best thinking configuration for the model
+    config_params = {"system_instruction": SYSTEM_PROMPT}
+
+    # gemini-3 and gemini-2.5 support thinking configs in this environment
+    if "2.5" in model_id or "3" in model_id:
+        try:
+            config_params["thinking_config"] = genai.types.ThinkingConfig(include_thoughts=True)
+        except:
+            # Fallback for unexpected SDK versioning
+            pass
+
+    config = genai.types.GenerateContentConfig(**config_params)
     return client.chats.create(
         model=model_id,
         config=config
@@ -507,7 +514,7 @@ if user_input:
     
     st.session_state.messages.append({"role": "user", "content": ui_content})
     
-    # 2. Send message (text + image) with multi-stage fallback
+    # 2. Send message (text + image) with tiered fallback
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             max_retries = 3
@@ -515,9 +522,14 @@ if user_input:
             success = False
             response = None
             
-            # Stage 1: Try Primary Model with Retry
+            # Tier 1: Primary Model (Gemini 3 Pro) with Retry
             for attempt in range(max_retries):
                 try:
+                    # Always ensure we are attempting the primary unless we've already switched
+                    if st.session_state.current_model != PRIMARY_MODEL and not success:
+                         st.session_state.current_model = PRIMARY_MODEL
+                         st.session_state.chat_session = get_chat_session(PRIMARY_MODEL)
+
                     response = st.session_state.chat_session.send_message(message_content)
                     success = True
                     break
@@ -526,29 +538,42 @@ if user_input:
                     if "503" in error_msg or "UNAVAILABLE" in error_msg:
                         if attempt < max_retries - 1:
                             time.sleep(retry_delay)
-                            retry_delay *= 2 # exponential backoff
+                            retry_delay *= 2
                             continue
                         else:
-                            # If primary keeps failing 503, fallback to Flash
-                            st.warning("Thinking model is busy. Falling back to Flash for this request...")
-                            st.session_state.current_model = FALLBACK_MODEL
-                            st.session_state.chat_session = get_chat_session(FALLBACK_MODEL)
+                            st.warning("Gemini 3 is currently overloaded. Trying Gemini 2.5 Flash...")
                             break
-                    elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                        # Permanent-ish error, fallback immediately
-                        st.warning("Quota reached for Thinking model. Falling back to Flash...")
-                        st.session_state.current_model = FALLBACK_MODEL
-                        st.session_state.chat_session = get_chat_session(FALLBACK_MODEL)
+                    elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "404" in error_msg:
+                        # Moving to secondary tier immediately
                         break
                     else:
-                        st.error(f"An unexpected error occurred: {e}")
+                        st.error(f"Error on Primary: {e}")
                         break
             
-            # Stage 2: Fallback if needed
-            if not success and st.session_state.current_model == FALLBACK_MODEL:
+            # Tier 2: Secondary Model (Gemini 2.5 Flash)
+            if not success:
                 try:
+                    st.session_state.current_model = SECONDARY_MODEL
+                    st.session_state.chat_session = get_chat_session(SECONDARY_MODEL)
                     response = st.session_state.chat_session.send_message(message_content)
                     success = True
+                    st.info("Using Gemini 2.5 Flash Thinking (Primary quota reached).")
+                except Exception as e:
+                    error_msg = str(e).upper()
+                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "503" in error_msg or "UNAVAILABLE" in error_msg:
+                        # Move to final tier
+                        pass
+                    else:
+                        st.error(f"Error on Secondary: {e}")
+
+            # Tier 3: Stable Fallback (Gemini 2.0 Flash)
+            if not success:
+                try:
+                    st.session_state.current_model = STABLE_MODEL
+                    st.session_state.chat_session = get_chat_session(STABLE_MODEL)
+                    response = st.session_state.chat_session.send_message(message_content)
+                    success = True
+                    st.warning("High-quality models are currently unavailable. Using stable fallback.")
                 except Exception as e:
                     st.error(f"Even fallback model failed: {e}")
             
