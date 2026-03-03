@@ -645,7 +645,8 @@ if user_input:
                     # Always ensure we are attempting the primary unless we've already switched
                     if st.session_state.current_model != PRIMARY_MODEL and not success:
                          # Preserve history during switch
-                         existing_history = st.session_state.chat_session.history if "chat_session" in st.session_state else None
+                         existing_session = st.session_state.get("chat_session")
+                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
                          st.session_state.current_model = PRIMARY_MODEL
                          st.session_state.chat_session = get_chat_session(PRIMARY_MODEL, history=existing_history)
 
@@ -673,7 +674,8 @@ if user_input:
             if not success:
                 try:
                     # Preserve history during switch
-                    existing_history = st.session_state.chat_session.history if "chat_session" in st.session_state else None
+                    existing_session = st.session_state.get("chat_session")
+                    existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
                     st.session_state.current_model = SECONDARY_MODEL
                     st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, history=existing_history)
                     response = st.session_state.chat_session.send_message(message_content)
@@ -691,7 +693,8 @@ if user_input:
             if not success:
                 try:
                     # Preserve history during switch
-                    existing_history = st.session_state.chat_session.history if "chat_session" in st.session_state else None
+                    existing_session = st.session_state.get("chat_session")
+                    existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
                     st.session_state.current_model = STABLE_MODEL
                     st.session_state.chat_session = get_chat_session(STABLE_MODEL, history=existing_history)
                     response = st.session_state.chat_session.send_message(message_content)
