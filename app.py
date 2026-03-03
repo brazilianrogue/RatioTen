@@ -657,41 +657,110 @@ if st.session_state.view_selection == "🍽️ Log":
 
         # 2. Add user message to UI state
         st.session_state.messages.append({"role": "user", "content": ui_content})
+        log_chat_to_sheet("user", ui_content)
         
         # Refresh current message display
         with st.chat_message("user"):
             for seg in ui_content:
                 st.write(seg)
         
-        # 3. Get Gemini Response
+        # 3. Get Gemini Response with Tiered Fallback
         with st.chat_message("assistant"):
-            try:
-                response = st.session_state.chat_session.send_message(message_content)
-                full_text = response.text
+            with st.spinner("Thinking..."):
+                max_retries = 3
+                retry_delay = 2 # initial delay
+                success = False
+                response = None
                 
-                # Thoughts/Chain-of-thought support (if present)
-                if response.candidates[0].thought:
-                    with st.expander("💭 Thinking Process", expanded=False):
-                        st.markdown(response.candidates[0].thought)
+                # Tier 1: Primary Model with Retry
+                for attempt in range(max_retries):
+                    try:
+                        if st.session_state.current_model != PRIMARY_MODEL and not success:
+                            existing_session = st.session_state.get("chat_session")
+                            existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
+                            st.session_state.current_model = PRIMARY_MODEL
+                            st.session_state.chat_session = get_chat_session(PRIMARY_MODEL, history=existing_history)
+
+                        response = st.session_state.chat_session.send_message(message_content)
+                        success = True
+                        break
+                    except Exception as e:
+                        error_msg = str(e).upper()
+                        if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                            if attempt < max_retries - 1:
+                                time.sleep(retry_delay)
+                                retry_delay *= 2
+                                continue
+                            else:
+                                st.warning("Primary model unavailable. Trying fallback...")
+                                break
+                        elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                            # 429 handled by fallback
+                            break
+                        else:
+                            st.error(f"Primary error: {e}")
+                            break
                 
-                # Check for table in response text for cleaner rendering
-                st.markdown(full_text)
+                # Tier 2: Secondary Model Fallback
+                if not success:
+                    try:
+                        existing_session = st.session_state.get("chat_session")
+                        existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
+                        st.session_state.current_model = SECONDARY_MODEL
+                        st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, history=existing_history)
+                        response = st.session_state.chat_session.send_message(message_content)
+                        success = True
+                        st.info("Using secondary model (Primary rate limit).")
+                    except Exception as e:
+                        # Continue to final fallback
+                        pass
+
+                # Tier 3: Stable Model Fallback
+                if not success:
+                    try:
+                        existing_session = st.session_state.get("chat_session")
+                        existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
+                        st.session_state.current_model = STABLE_MODEL
+                        st.session_state.chat_session = get_chat_session(STABLE_MODEL, history=existing_history)
+                        response = st.session_state.chat_session.send_message(message_content)
+                        success = True
+                        st.warning("High-performance models unavailable. Using stable fallback.")
+                    except Exception as e:
+                        st.error(f"Critical Error: {e}")
                 
-                # 4. Persistence & Cleanup
-                st.session_state.messages.append({"role": "assistant", "content": full_text})
-                
-                # Clear pending image once sent
-                if image_to_send:
+                # 4. Handle Response & Logging
+                if success and response:
+                    # Clean the displayed text (remove JSON)
+                    display_text = re.sub(r'```json\n.*?\n```', '', response.text, flags=re.DOTALL).strip()
+                    
+                    # Thoughts/Chain-of-thought support
+                    if response.candidates and response.candidates[0].thought:
+                        with st.expander("💭 Thinking Process", expanded=False):
+                            st.markdown(response.candidates[0].thought)
+                    
+                    st.markdown(display_text)
+                    
+                    # Parse and Log Food to Sheet
+                    match = re.search(r'```json\n(.*?)\n```', response.text, re.DOTALL)
+                    if match:
+                        try:
+                            items_to_log = json.loads(match.group(1))
+                            for data in items_to_log:
+                                if log_to_sheet(data.get("item", "Unknown"), 
+                                               data.get("calories", 0), 
+                                               data.get("protein", 0), 
+                                               data.get("density", "0%")):
+                                    st.toast(f"Logged: {data.get('item')}")
+                            get_trailing_7_days_data.clear()
+                        except Exception as e:
+                            st.error(f"Logging error: {e}")
+                    
+                    # Persistence & Cleanup
+                    st.session_state.messages.append({"role": "assistant", "content": display_text})
+                    log_chat_to_sheet("assistant", display_text)
                     st.session_state.pending_image = None
-                
-                # Log to Google Sheets
-                log_to_sheet(full_text)
-                
-                # Trigger rerun to sync dashboard metrics
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error: {e}")
+                    st.session_state.show_camera = False
+                    st.rerun()
 
 else:
     # --- Analytics View ---
