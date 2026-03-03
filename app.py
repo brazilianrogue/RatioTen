@@ -78,7 +78,7 @@ st.markdown("""
     .metric-card {
         background-color: #31333F;
         color: white;
-        padding: 12px 8px;
+        padding: 15px 10px;
         border-radius: 10px;
         flex: 1;
         min-width: 0;
@@ -87,15 +87,13 @@ st.markdown("""
         flex-direction: column;
         align-items: flex-start;
         justify-content: flex-start;
-        height: 100px;
+        min-height: 110px;
     }
     .metric-label {
         font-size: 0.75rem;
         color: #e0e0e0;
         margin-bottom: 4px;
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
         width: 100%;
     }
     .metric-value {
@@ -118,6 +116,13 @@ st.markdown("""
     header[data-testid="stHeader"] {
         background: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
+    }
+    .block-container {
+        padding-top: 5rem !important;
+        padding-bottom: 0rem !important;
+    }
+    .stChatFloatingInputContainer {
+        bottom: 20px !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -490,52 +495,61 @@ with st.sidebar:
             st.rerun()
 
 # --- 4. Modernized Header & Dashboard ---
-st.markdown("### **Ratio**<span style='color:#00A6FF'>Ten</span>", unsafe_allow_html=True)
-
-# Animated Fasting Timer
+# --- 4. Modernized Dashboard ---
+# Fasting Status & Weight row
 status, target_timestamp = get_fasting_status(fasting_schedule)
-timer_html = f"""
-<div style="background-color: #31333F; color: white; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    <div style="font-size: 0.9rem; color: #e0e0e0; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;">{status}</div>
-    <div id="countdown-timer" style="font-size: 1.8rem; font-weight: 700; color: #00A6FF; font-variant-numeric: tabular-nums;">--:--:--</div>
+lowest_w = get_lowest_weight()
+
+dashboard_html = f"""
+<div class="metric-container">
+    <div class="metric-card" style="border: 1px solid #00A6FF;">
+        <div class="metric-label">Status</div>
+        <div class="metric-value" style="font-size: 1rem; color: #00A6FF;">{status}</div>
+        <div id="countdown-timer" style="font-size: 1.1rem; font-weight: 700; color: white;">--:--:--</div>
+    </div>
+    <div class="metric-card" style="border: 1px solid #00A6FF;">
+        <div class="metric-label">Record Low</div>
+        <div class="metric-value" style="font-size: 1.5rem;">{f"{lowest_w:.1f}" if lowest_w else "--"}</div>
+        <div class="metric-delta delta-green">lbs</div>
+    </div>
 </div>
-<script>
-(function() {{
-    const targetTime = {target_timestamp if target_timestamp else 'null'};
-    const timerElement = window.parent.document.getElementById('countdown-timer') || document.getElementById('countdown-timer');
-    
-    function updateTimer() {{
-        if (!targetTime) {{
-            if(timerElement) timerElement.innerHTML = "No upcoming window";
-            return;
-        }}
-        
-        const now = new Date().getTime();
-        const difference = targetTime - now;
-        
-        if (difference <= 0) {{
-            if(timerElement) timerElement.innerHTML = "00:00:00";
-            return;
-        }}
-        
-        const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((difference % (1000 * 60)) / 1000);
-        
-        if(timerElement) {{
-            timerElement.innerHTML = 
-                String(hours).padStart(2, '0') + ":" + 
-                String(minutes).padStart(2, '0') + ":" + 
-                String(seconds).padStart(2, '0');
-        }}
-    }}
-    
-    updateTimer();
-    setInterval(updateTimer, 1000);
-}})();
-</script>
 """
-st.components.v1.html(timer_html, height=120)
+st.markdown(dashboard_html, unsafe_allow_html=True)
+
+# Inject JS for timer separately
+if target_timestamp:
+    st.components.v1.html(f"""
+    <script>
+    (function() {{
+        const targetTime = {target_timestamp};
+        const timerElement = window.parent.document.getElementById('countdown-timer') || document.getElementById('countdown-timer');
+        
+        function updateTimer() {{
+            const now = new Date().getTime();
+            const difference = targetTime - now;
+            
+            if (difference <= 0) {{
+                if(timerElement) timerElement.innerHTML = "00:00:00";
+                return;
+            }}
+            
+            const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+            
+            if(timerElement) {{
+                timerElement.innerHTML = 
+                    String(hours).padStart(2, '0') + ":" + 
+                    String(minutes).padStart(2, '0') + ":" + 
+                    String(seconds).padStart(2, '0');
+            }}
+        }}
+        
+        updateTimer();
+        setInterval(updateTimer, 1000);
+    }})();
+    </script>
+    """, height=0)
 
 df_7days = get_trailing_7_days_data()
 
@@ -552,7 +566,7 @@ if not df_7days.empty and 'Date' in df_7days.columns:
 else:
     cals, protein, density = 0, 0, "0.0%"
 
-# Metric Row (Custom HTML/CSS for reliable 3-wide mobile layout)
+# Metric Row (Daily Targets)
 metric_html = f"""
 <div class="metric-container">
     <div class="metric-card">
@@ -578,15 +592,6 @@ metric_html = f"""
 """
 st.markdown(metric_html, unsafe_allow_html=True)
 
-# Record Low Metric (if available)
-lowest_w = get_lowest_weight()
-if lowest_w:
-    st.markdown(f"""
-    <div style="background-color: #31333F; color: #00A6FF; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 20px; font-weight: bold; border: 1px solid #00A6FF;">
-        🌟 Record Lowest Weight: {lowest_w:.1f} lbs
-    </div>
-    """, unsafe_allow_html=True)
-
 # Collapsible Weekly History
 with st.expander("📊 Weekly History", expanded=False):
     if not df_7days.empty:
@@ -610,15 +615,16 @@ if "messages" not in st.session_state or not st.session_state.messages:
 if "chat_session" not in st.session_state:
     st.session_state.chat_session = get_chat_session(st.session_state.current_model)
 
-# Display previous chat messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        content = message["content"]
-        if isinstance(content, list):
-            for item in content:
-                st.write(item)
-        else:
-            st.markdown(content)
+# Display previous chat messages in a fixed-height container (optimized for Pro Max)
+with st.container(height=450):
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            content = message["content"]
+            if isinstance(content, list):
+                for item in content:
+                    st.write(item)
+            else:
+                st.markdown(content)
 
 # --- 6. Chat Input Support ---
 # Status indicator for pending image
