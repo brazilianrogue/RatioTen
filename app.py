@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import json
 import re
 import time
+import persona
 
 EASTERN = ZoneInfo("America/New_York")
 PRIMARY_MODEL = "gemini-3-pro-preview"
@@ -34,10 +35,10 @@ if "view_selection" not in st.session_state:
 
 # --- Function Definitions ---
 @st.cache_resource
-def get_chat_session(model_id, history=None):
+def get_chat_session(model_id, system_prompt, history=None):
     # Determine the best thinking configuration for the model
-    config_params = {"system_instruction": SYSTEM_PROMPT}
-
+    config_params = {"system_instruction": system_prompt}
+    
     # gemini-3 and gemini-2.5 support thinking configs in this environment
     if "2.5" in model_id or "3" in model_id:
         try:
@@ -321,7 +322,9 @@ def get_persistent_chat():
         history = []
         for row in rows[-30:]: # Last 30 messages for context
             if len(row) < 3: continue
-            ts, role, parts_json = row
+            ts = row[0]
+            role = row[1]
+            parts_json = row[2]
             try:
                 parts = json.loads(parts_json)
                 content = [p.get("text", "") for p in parts]
@@ -389,7 +392,8 @@ def get_custom_instructions():
         instructions = []
         for row in data[1:]:
             if len(row) >= 2:
-                label, content = row
+                label = row[0]
+                content = row[1]
                 if content.strip():
                     instructions.append(f"### {label}\n{content}")
         return "\n\n".join(instructions)
@@ -397,13 +401,56 @@ def get_custom_instructions():
         return ""
 
 # --- 3. System Prompt (The Rules Engine) ---
-def get_system_prompt(schedule, custom_instructions=""):
+def get_system_prompt(schedule, custom_instructions="", today_stats=None, weekly_summary=None):
+    now = datetime.now(EASTERN)
+    current_day = now.strftime("%A")
+    current_date = now.strftime("%Y-%m-%d")
+    current_time = now.strftime("%I:%M %p")
+    
+    time_awareness = f"""
+### CURRENT TIME AWARENESS:
+- **Today is:** {current_day}, {current_date}
+- **Current Time:** {current_time} (Eastern Time)
+
+*Note: Use this time for strategic planning and calculating remaining windows, but do not over-index on exact minutes for fasting compliance (flexibility of a few minutes is expected).*
+"""
+
     formatted_schedule = "\n".join([f"- {day}: {times['start']} to {times['end']}" if times['start'] else f"- {day}: Fasting / Skip" for day, times in schedule.items()])
+    
+    stats_context = ""
+    if today_stats:
+        stats_context = f"""
+### CURRENT DAY SITUATION REPORT:
+- **Calories Ingested:** {today_stats['cals']} / 1500 (Lid)
+- **Protein Ingested:** {today_stats['protein']}g / 150g (Floor)
+- **Current Density:** {today_stats['density']}
+- **Remaining Calorie Room:** {max(0, 1500 - today_stats['cals'])}
+- **Remaining Protein Needed:** {max(0, 150 - today_stats['protein'])}g
+"""
+
+    weekly_context = ""
+    if weekly_summary is not None and not weekly_summary.empty:
+        weekly_context = f"\n### ROLLING 7-DAY TREND:\n{weekly_summary.to_markdown(index=False)}"
+
     return f"""
-You are the RatioTen Assistant, a precise, analytical, and highly supportive nutrition tracker.
-Primary Quality Metric: Protein Density (Goal: 10.0%).
+You are the RatioTen Assistant, acting as a **Tactical Performance Coach** and **Logistics Officer**.
+You are precise, analytical, proactive, and highly supportive.
+
+{persona.BIO_DATA}
+{persona.TONE_GUIDANCE}
+{persona.VOCABULARY}
+{persona.BANTER_INSTRUCTIONS}
+{persona.RELATIONSHIP_CLOSING}
+
+{time_awareness}
+
+Core Logic:
+- Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
 - For example: an item with 150 calories and 30g protein has a density of 30 / 150 = 0.20 = 20.0%.
+
+{stats_context}
+{weekly_context}
 
 Remote Custom Instructions (Source of Truth):
 {custom_instructions}
@@ -422,20 +469,19 @@ Formatting Constraints (Mobile Optimized):
 - Use standard, properly formatted Markdown tables (which Streamlit renders as nice HTML tables). Do not use raw ASCII formatting.
 - The "Density" column must always be displayed as a percentage with exactly one decimal place (e.g., 11.5%, 5.0%, 12.3%).
 - NEVER include Date or Date-Range columns in visible output (track silently).
-- When logging food, display ONLY ONE table with the items, but you MUST also include conversational banter as described below.
+- When logging food, display ONLY ONE table with the items, but you MUST also include conversational banter.
   1. Current Day's Items: (Item Name, Cals, Protein, Density)
 
 Daily Targets & Banter (REQUIRED):
 - Goal: <= 1500 Calories, >= 150g Protein, Density Target: >= 10.0%.
-- You are a conversational, supportive, and analytical AI.
 - Below the data table, you MUST evaluate each logged item and the overall progress for the day against these targets.
-- Include encouraging banter about how the day is shaping up, if the item is a good choice for aligning with the goals, and suggest adjustments if needed.
-- On Sundays (weekly wrap-up), provide a brief encouraging summary.
+- Use "Shred Language" and maintain the persona in your evaluation.
+- Ending: Always end with a "Verdict" or "Strategy" for the next meal. Always look for the "next play."
 
 Daily 6:00 PM Wrap-Up (Creatine Check):
 - Check logs for "protein shake" or "ultra-filtered shake".
 - If present: Assume creatine was taken. No reminder.
-- If missing: Remind me to take creatine. Suggest mixing it with a Prime hydration drink.
+- If missing: Remind me to "clear the supplement" (Creatine Watchdog) to maintain saturation.
 
 JSON Output for Database Logging:
 - When the user logs food items, you MUST append a JSON block at the very end of your response containing a list of objects for EACH item logged.
@@ -500,7 +546,22 @@ with st.sidebar:
     if st.button("🗑️ Clear Chat History", help="Permanently clear the persistent thread from Google Sheets"):
         if clear_persistent_chat():
             st.session_state.messages = [{"role": "assistant", "content": "Thread cleared. Ready to start fresh!"}]
-            st.session_state.chat_session = get_chat_session(st.session_state.current_model)
+            
+            # Fetch fresh stats for the new session
+            df_init = get_trailing_7_days_data()
+            today_init = datetime.now(EASTERN).strftime("%Y-%m-%d")
+            cals_init, protein_init, density_init = 0, 0, "0.0%"
+            if not df_init.empty and 'Date' in df_init.columns:
+                today_data = df_init[df_init['Date'] == today_init]
+                if not today_data.empty:
+                    cals_init = int(today_data.iloc[0].get('Calories', 0))
+                    protein_init = int(today_data.iloc[0].get('Protein', 0))
+                    density_init = today_data.iloc[0].get('Density', '0.0%')
+            
+            init_stats = {'cals': cals_init, 'protein': protein_init, 'density': density_init}
+            fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=init_stats, weekly_summary=df_init)
+            
+            st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt)
             st.success("History wiped!")
             st.rerun()
 
@@ -616,7 +677,9 @@ if st.session_state.view_selection == "🍽️ Log":
                 ]
 
     if "chat_session" not in st.session_state:
-        st.session_state.chat_session = get_chat_session(st.session_state.current_model)
+        current_stats = {'cals': cals, 'protein': protein, 'density': density}
+        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+        st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt)
 
     # Display previous chat messages in a fixed-height container (optimized for Pro Max)
     with st.container(height=450):
@@ -673,13 +736,18 @@ if st.session_state.view_selection == "🍽️ Log":
                 response = None
                 
                 # Tier 1: Primary Model with Retry
+                retry_delay_val = 2.0
                 for attempt in range(max_retries):
                     try:
-                        if st.session_state.current_model != PRIMARY_MODEL and not success:
-                            existing_session = st.session_state.get("chat_session")
-                            existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
-                            st.session_state.current_model = PRIMARY_MODEL
-                            st.session_state.chat_session = get_chat_session(PRIMARY_MODEL, history=existing_history)
+                        # Refresh session with latest stats for proactive auditing
+                        current_stats = {'cals': cals, 'protein': protein, 'density': density}
+                        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        
+                        existing_session = st.session_state.get("chat_session")
+                        existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
+                        
+                        # Re-initialize session with fresh prompt and existing history
+                        st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt, history=existing_history)
 
                         response = st.session_state.chat_session.send_message(message_content)
                         success = True
@@ -688,8 +756,8 @@ if st.session_state.view_selection == "🍽️ Log":
                         error_msg = str(e).upper()
                         if "503" in error_msg or "UNAVAILABLE" in error_msg:
                             if attempt < max_retries - 1:
-                                time.sleep(retry_delay)
-                                retry_delay *= 2
+                                time.sleep(retry_delay_val)
+                                retry_delay_val = retry_delay_val * 2
                                 continue
                             else:
                                 st.warning("Primary model unavailable. Trying fallback...")
@@ -707,7 +775,11 @@ if st.session_state.view_selection == "🍽️ Log":
                         existing_session = st.session_state.get("chat_session")
                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
                         st.session_state.current_model = SECONDARY_MODEL
-                        st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, history=existing_history)
+                        
+                        current_stats = {'cals': cals, 'protein': protein, 'density': density}
+                        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        
+                        st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, fresh_prompt, history=existing_history)
                         response = st.session_state.chat_session.send_message(message_content)
                         success = True
                         st.info("Using secondary model (Primary rate limit).")
@@ -721,7 +793,11 @@ if st.session_state.view_selection == "🍽️ Log":
                         existing_session = st.session_state.get("chat_session")
                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
                         st.session_state.current_model = STABLE_MODEL
-                        st.session_state.chat_session = get_chat_session(STABLE_MODEL, history=existing_history)
+                        
+                        current_stats = {'cals': cals, 'protein': protein, 'density': density}
+                        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        
+                        st.session_state.chat_session = get_chat_session(STABLE_MODEL, fresh_prompt, history=existing_history)
                         response = st.session_state.chat_session.send_message(message_content)
                         success = True
                         st.warning("High-performance models unavailable. Using stable fallback.")
@@ -764,18 +840,44 @@ if st.session_state.view_selection == "🍽️ Log":
                     st.rerun()
 
 else:
-    # --- Analytics View ---
-    st.subheader("📊 Performance Analytics")
-    df_7days = get_trailing_7_days_data()
-    
-    # Weekly History Table
-    st.markdown("#### Trailing 7 Days")
+    # Data Visualization Tool
     if not df_7days.empty:
-        st.dataframe(df_7days, width="stretch", hide_index=True)
-    else:
-        st.info("No logs found for the trailing 7 days.")
+        st.divider()
+        st.markdown("#### Performance Trends")
+        
+        # Prepare data for plotting
+        plot_df = df_7days.copy()
+        plot_df['Date'] = pd.to_datetime(plot_df['Date'])
+        plot_df = plot_df.sort_values('Date')
+        
+        # Clean Density for plotting (convert "11.5%" to 11.5)
+        if 'Density' in plot_df.columns:
+            plot_df['Density_Val'] = plot_df['Density'].str.replace('%', '').astype(float)
+        
+        # Metric Selector
+        metrics = ["Calories", "Protein", "Density_Val"]
+        cols = st.columns([2, 1])
+        with cols[0]:
+            selected_metrics = st.multiselect(
+                "Select Metrics to Visualize",
+                options=metrics,
+                default=["Calories"],
+                format_func=lambda x: x.replace("_Val", " (%)")
+            )
+        
+        if selected_metrics:
+            # Create a display-friendly dataframe for the chart
+            chart_data = plot_df.set_index('Date')[selected_metrics]
+            chart_data.columns = [c.replace("_Val", " Density (%)") for c in chart_data.columns]
+            
+            st.line_chart(chart_data, use_container_width=True)
+            
+            if len(selected_metrics) > 1:
+                st.caption("Note: Metrics have different scales (Calories ~1500, Protein ~150, Density ~10%).")
+        else:
+            st.info("Select at least one metric to visualize the trend.")
     
-    st.info("💡 More graphs and insights coming soon!")
     st.divider()
+    st.info("💡 Strategic tip: Use the '🍽️ Log' view to add data for today!")
 
     # End of view-specific content
