@@ -188,6 +188,35 @@ def get_trailing_7_days_data():
         st.error(f"Error fetching logs: {e}")
         return pd.DataFrame(columns=expected_cols)
 
+@st.cache_data(ttl=60)
+def get_today_log_for_timeline():
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        worksheet = sh.sheet1
+        
+        values = worksheet.get_all_values()
+        if len(values) <= 1:
+            return []
+            
+        today_str = datetime.now(EASTERN).strftime("%Y-%m-%d")
+        logs = []
+        for row in values[1:]:
+            if len(row) < 2: continue
+            ts_str = row[0]
+            if ts_str.startswith(today_str):
+                try:
+                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                    item = row[1]
+                    emoji = row[6] if len(row) > 6 else "🍽️"
+                    logs.append({"timestamp": ts, "item": item, "emoji": emoji})
+                except:
+                    continue
+        return logs
+    except:
+        return []
+
 @st.cache_data(ttl=600)
 def get_wow_data(enable_demo=False):
     expected_cols = ["Week", "Avg Calories", "Avg Protein", "Density"]
@@ -350,7 +379,7 @@ def get_fasting_status(schedule):
     
     return "No Schedule", None
 
-def log_to_sheet(item, calories, protein, density):
+def log_to_sheet(item, calories, protein, density, emoji="🍽️"):
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
@@ -364,7 +393,7 @@ def log_to_sheet(item, calories, protein, density):
         year, week, _ = now.isocalendar()
         week_num = f"{year}-W{week:02d}"
         
-        worksheet.append_row([today, item, calories, protein, density, week_num])
+        worksheet.append_row([today, item, calories, protein, density, week_num, emoji])
         get_trailing_7_days_data.clear()
         return True
     except Exception as e:
@@ -563,7 +592,7 @@ JSON Output for Database Logging:
 - Format exactly like this:
 ```json
 [
-  {{"item": "Food Name", "calories": 150, "protein": 30, "density": "20.0%"}}
+  {{"item": "Food Name", "calories": 150, "protein": 30, "density": "20.0%", "emoji": "🍔"}}
 ]
 ```
 - Only include the JSON block if new food is being logged.
@@ -740,6 +769,101 @@ if st.session_state.view_selection == "🍽️ Log":
     </div>
     """
     st.markdown(metric_html, unsafe_allow_html=True)
+    
+    # --- 4.5 Timeline Dashboard (New Feature) ---
+    if status == "Eating Window Active":
+        now = datetime.now(EASTERN)
+        day_name = now.strftime("%A")
+        sched = fasting_schedule.get(day_name)
+        if sched and sched["start"] and sched["end"]:
+            try:
+                start_dt = datetime.combine(now.date(), datetime.strptime(sched["start"], "%H:%M").time()).replace(tzinfo=EASTERN)
+                end_dt = datetime.combine(now.date(), datetime.strptime(sched["end"], "%H:%M").time()).replace(tzinfo=EASTERN)
+                
+                total_duration = (end_dt - start_dt).total_seconds()
+                elapsed = (now - start_dt).total_seconds()
+                progress_pct = max(0, min(100, (elapsed / total_duration) * 100))
+                
+                # Fetch today's food logs for timeline
+                today_logs = get_today_log_for_timeline()
+                emoji_markers = ""
+                for log in today_logs:
+                    log_ts = log["timestamp"].replace(tzinfo=EASTERN)
+                    if start_dt <= log_ts <= end_dt:
+                        pos = ((log_ts - start_dt).total_seconds() / total_duration) * 100
+                        emoji_markers += f'<div class="timeline-emoji" style="left: {pos}%;" title="{log["item"]}">{log["emoji"]}</div>'
+                
+                timeline_html = f"""
+                <style>
+                .timeline-wrapper {{
+                    width: 100%;
+                    padding: 20px 0 10px 0;
+                    margin-bottom: 10px;
+                    position: relative;
+                }}
+                .timeline-bar {{
+                    height: 4px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 2px;
+                    position: relative;
+                    width: 100%;
+                }}
+                .timeline-progress {{
+                    position: absolute;
+                    height: 100%;
+                    background: linear-gradient(90deg, #00A6FF, #00FFCC);
+                    border-radius: 2px;
+                    box-shadow: 0 0 10px rgba(0, 166, 255, 0.5);
+                }}
+                .timeline-marker {{
+                    position: absolute;
+                    top: 50%;
+                    transform: translate(-50%, -50%);
+                    width: 12px;
+                    height: 12px;
+                    background: white;
+                    border: 2px solid #00A6FF;
+                    border-radius: 50%;
+                    box-shadow: 0 0 8px #00A6FF;
+                    z-index: 10;
+                }}
+                .timeline-emoji {{
+                    position: absolute;
+                    top: -22px;
+                    transform: translateX(-50%);
+                    font-size: 1.2rem;
+                    cursor: help;
+                    transition: transform 0.2s;
+                    z-index: 5;
+                }}
+                .timeline-emoji:hover {{
+                    transform: translateX(-50%) scale(1.3);
+                }}
+                .timeline-labels {{
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 0.65rem;
+                    color: #888;
+                    margin-top: 6px;
+                    font-family: monospace;
+                }}
+                </style>
+                <div class="timeline-wrapper">
+                    <div class="timeline-bar">
+                        <div class="timeline-progress" style="width: {progress_pct}%;"></div>
+                        <div class="timeline-marker" style="left: {progress_pct}%;"></div>
+                        {emoji_markers}
+                    </div>
+                    <div class="timeline-labels">
+                        <span>{sched["start"]}</span>
+                        <span>{sched["end"]}</span>
+                    </div>
+                </div>
+                """
+                st.markdown(timeline_html, unsafe_allow_html=True)
+            except Exception as e:
+                pass # Fail silently for UI element
+
     st.divider()
 
     # --- 5. Initialize Chat History & Session State (Log View Only) ---
@@ -903,8 +1027,9 @@ if st.session_state.view_selection == "🍽️ Log":
                                 if log_to_sheet(data.get("item", "Unknown"), 
                                                data.get("calories", 0), 
                                                data.get("protein", 0), 
-                                               data.get("density", "0%")):
-                                    st.toast(f"Logged: {data.get('item')}")
+                                               data.get("density", "0%"),
+                                               data.get("emoji", "🍽️")):
+                                    st.toast(f"Logged: {data.get('item')} {data.get('emoji', '🍽️')}")
                             get_trailing_7_days_data.clear()
                         except Exception as e:
                             st.error(f"Logging error: {e}")
