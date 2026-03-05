@@ -845,6 +845,17 @@ if st.session_state.view_selection == "🍽️ Log":
                     st.rerun()
 
 else:
+    # --- Analytics View ---
+    st.subheader("📊 Performance Analytics")
+    df_7days = get_trailing_7_days_data()
+
+    # Weekly History Table
+    st.markdown("#### Trailing 7 Days")
+    if not df_7days.empty:
+        st.dataframe(df_7days, width="stretch", hide_index=True)
+    else:
+        st.info("No logs found for the trailing 7 days.")
+
     # Data Visualization Tool
     if not df_7days.empty:
         st.divider()
