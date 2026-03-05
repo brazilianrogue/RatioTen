@@ -207,21 +207,7 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
 
         header_html = f'<div style="font-size: 0.85rem; color: #00A6FF; margin-bottom: 2px; font-weight: 700;">{title}</div>' if title else ""
 
-        return f'''
-<div style="margin-top: 10px; margin-bottom: 20px;">
-    {header_html}
-    <div class="timeline-wrapper">
-        <div class="timeline-bar">
-            {marker_html}
-            {emoji_markers}
-        </div>
-        <div class="timeline-labels">
-            <span>{start_time_str}</span>
-            <span>{end_time_str}</span>
-        </div>
-    </div>
-</div>
-'''
+        return f'<div style="margin-top: 10px; margin-bottom: 20px;">{header_html}<div class="timeline-wrapper"><div class="timeline-bar">{marker_html}{emoji_markers}</div><div class="timeline-labels"><span>{start_time_str}</span><span>{end_time_str}</span></div></div></div>'
     except Exception as e:
         return f"<!-- Timeline Error: {e} -->"
 
