@@ -196,8 +196,23 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
             log_ts = log["timestamp"].replace(tzinfo=EASTERN)
             log_norm = datetime.combine(ref_date, log_ts.time()).replace(tzinfo=EASTERN)
             
+            # Boundary logic: include items within 1 hour before start or 1 hour after end
+            one_hour = timedelta(hours=1)
+            is_valid = False
+            pos = 0.0
+            
             if start_dt <= log_norm <= end_dt:
-                pos = max(0, min(100, ((log_norm - start_dt).total_seconds() / total_duration) * 100))
+                is_valid = True
+                pos = ((log_norm - start_dt).total_seconds() / total_duration) * 100
+            elif (start_dt - one_hour) <= log_norm < start_dt:
+                is_valid = True
+                pos = 0.0 # Snap to start
+            elif end_dt < log_norm <= (end_dt + one_hour):
+                is_valid = True
+                pos = 100.0 # Snap to end
+                
+            if is_valid:
+                pos = max(0.0, min(100.0, pos))
                 emoji = log["emoji"].strip() if log["emoji"] else "🍽️"
                 emoji_markers += f'<div class="timeline-emoji" style="left: {pos:.1f}%;" title="{log["item"]}">{emoji}</div>'
         
