@@ -188,6 +188,76 @@ def get_trailing_7_days_data():
         st.error(f"Error fetching logs: {e}")
         return pd.DataFrame(columns=expected_cols)
 
+@st.cache_data(ttl=600)
+def get_wow_data(enable_demo=False):
+    expected_cols = ["Week", "Avg Calories", "Avg Protein", "Density"]
+    if enable_demo:
+        # Generate 4 weeks of demo data
+        return pd.DataFrame([
+            {"Week": "2026-W06", "Avg Calories": 1420, "Avg Protein": 155, "Density": "10.9%"},
+            {"Week": "2026-W07", "Avg Calories": 1650, "Avg Protein": 140, "Density": "8.5%"},
+            {"Week": "2026-W08", "Avg Calories": 1480, "Avg Protein": 160, "Density": "10.8%"},
+            {"Week": "2026-W09", "Avg Calories": 1390, "Avg Protein": 165, "Density": "11.9%"}
+        ])
+
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        worksheet = sh.sheet1
+        
+        values = worksheet.get_all_values()
+        if len(values) <= 1:
+            return pd.DataFrame(columns=expected_cols)
+            
+        df = pd.DataFrame(values[1:])
+        headers = values[0]
+        # Map headers flexible to indices
+        col_map = {h: i for i, h in enumerate(headers)}
+        
+        # We need Date, Calories, Protein, and optionally Week Num
+        # If Week Num missing, calculate it
+        processed_data = []
+        for row in values[1:]:
+            try:
+                date_str = row[col_map.get("Date", 0)]
+                dt = pd.to_datetime(date_str)
+                cals = pd.to_numeric(row[col_map.get("Calories", 2)], errors='coerce') or 0
+                prot = pd.to_numeric(row[col_map.get("Protein", 3)], errors='coerce') or 0
+                
+                # Week Num handling
+                if "Week Num" in col_map and len(row) > col_map["Week Num"]:
+                    wn = row[col_map["Week Num"]]
+                else:
+                    year, week, _ = dt.isocalendar()
+                    wn = f"{year}-W{week:02d}"
+                
+                processed_data.append({"Date": dt.date(), "Week": wn, "Calories": cals, "Protein": prot})
+            except:
+                continue
+        
+        if not processed_data:
+            return pd.DataFrame(columns=expected_cols)
+            
+        df_proc = pd.DataFrame(processed_data)
+        
+        # 1. Group by Date and Week to get DAILY totals first
+        daily_totals = df_proc.groupby(['Week', 'Date'])[['Calories', 'Protein']].sum().reset_index()
+        
+        # 2. Group by Week to get AVERAGE daily totals
+        weekly_summary = daily_totals.groupby('Week')[['Calories', 'Protein']].mean().reset_index()
+        weekly_summary.columns = ["Week", "Avg Calories", "Avg Protein"]
+        
+        # Calculate Weekly Density
+        weekly_summary['Density'] = (weekly_summary['Avg Protein'] / weekly_summary['Avg Calories']) * 100
+        weekly_summary['Density_Val'] = weekly_summary['Density'].fillna(0)
+        weekly_summary['Density'] = weekly_summary['Density_Val'].apply(lambda x: f"{x:.1f}%")
+        
+        return weekly_summary.sort_values('Week', ascending=True)
+        
+    except Exception as e:
+        return pd.DataFrame(columns=expected_cols)
+
 @st.cache_data(ttl=3600)
 def get_lowest_weight():
     try:
@@ -543,10 +613,12 @@ with st.sidebar:
     
     if st.session_state.pending_image:
         st.info("✅ Image ready to send")
-        if st.button("🗑️ Discard Photo", use_container_width=True):
-            st.session_state.pending_image = None
-            st.rerun()
-
+    st.divider()
+    st.subheader("🛠️ Developer Tools")
+    if "enable_demo" not in st.session_state:
+        st.session_state.enable_demo = False
+    st.session_state.enable_demo = st.toggle("Enable Demo Data", value=st.session_state.enable_demo, help="Show sample data for weekly trends.")
+    
     st.divider()
     if st.button("🗑️ Clear Chat History", help="Permanently clear the persistent thread from Google Sheets"):
         if clear_persistent_chat():
@@ -894,11 +966,48 @@ else:
             chart_data.columns = [c.replace("_Val", " Density (%)") for c in chart_data.columns]
             
             st.line_chart(chart_data, use_container_width=True)
-            
-            if len(selected_metrics) > 1:
-                st.caption("Note: Metrics have different scales (Calories ~1500, Protein ~150, Density ~10%).")
+            st.caption("Note: Metric scales differ (Calories: ~1500, Protein: ~150, Density: ~10%). Multi-metric view may compress smaller values.")
         else:
             st.info("Select at least one metric to visualize the trend.")
+    
+    # --- Week-over-Week Analytics ---
+    st.divider()
+    st.subheader("🗓️ Week-over-Week Performance")
+    
+    # Fetch WoW Data (handle demo mode)
+    enable_demo = st.session_state.get("enable_demo", False)
+    df_wow = get_wow_data(enable_demo=enable_demo)
+    
+    if not df_wow.empty:
+        # WoW History Table
+        st.markdown("#### Weekly Averages")
+        st.dataframe(df_wow[["Week", "Avg Calories", "Avg Protein", "Density"]], width="stretch", hide_index=True)
+        
+        st.markdown("#### Weekly Trends")
+        # Reuse same metric selection logic for WoW
+        metrics_wow = ["Avg Calories", "Avg Protein", "Density_Val"]
+        selected_metrics_wow = st.multiselect(
+            "Select Metrics for WoW Trends",
+            options=metrics_wow,
+            default=["Avg Calories"],
+            key="wow_metrics",
+            format_func=lambda x: x.replace("Avg ", "").replace("_Val", " (%)")
+        )
+        
+        if selected_metrics_wow:
+            wow_plot_df = df_wow.set_index('Week')[selected_metrics_wow]
+            # Rename for display
+            display_cols = []
+            for c in wow_plot_df.columns:
+                name = c.replace("Avg ", "")
+                if "_Val" in name:
+                    name = name.replace("_Val", " Density (%)")
+                display_cols.append(name)
+            wow_plot_df.columns = display_cols
+            
+            st.line_chart(wow_plot_df, use_container_width=True)
+    else:
+        st.info("Insufficient data for Week-over-Week trends. Start logging to build your history!")
     
     st.divider()
     st.info("💡 Strategic tip: Use the '🍽️ Log' view to add data for today!")
