@@ -117,16 +117,59 @@ st.markdown("""
     }
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
-    .stButton button {
-        border-radius: 20px;
-        font-weight: 600;
+    
+    /* Timeline styles */
+    .timeline-wrapper {
+        width: 100%;
+        padding: 25px 0 10px 0;
+        margin-bottom: 25px;
+        position: relative;
     }
-    .block-container {
-        padding-top: 5rem !important;
-        padding-bottom: 0rem !important;
+    .timeline-bar {
+        height: 6px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+        position: relative;
+        width: 100%;
     }
-    .stChatFloatingInputContainer {
-        bottom: 20px !important;
+    .timeline-progress {
+        position: absolute;
+        height: 100%;
+        background: linear-gradient(90deg, #00A6FF, #00FFCC);
+        border-radius: 3px;
+        box-shadow: 0 0 10px rgba(0, 166, 255, 0.5);
+    }
+    .timeline-marker {
+        position: absolute;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 14px;
+        height: 14px;
+        background: white;
+        border: 2px solid #00A6FF;
+        border-radius: 50%;
+        box-shadow: 0 0 8px #00A6FF;
+        z-index: 10;
+    }
+    .timeline-emoji {
+        position: absolute;
+        top: -24px;
+        transform: translateX(-50%);
+        font-size: 1.3rem;
+        cursor: help;
+        transition: transform 0.2s;
+        z-index: 5;
+    }
+    .timeline-emoji:hover {
+        transform: translateX(-50%) scale(1.4);
+    }
+    .timeline-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.7rem;
+        color: #888;
+        margin-top: 8px;
+        font-family: monospace;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -140,12 +183,9 @@ client = get_client()
 
 def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, title=None):
     """
-    start_time_str, end_time_str: "HH:MM"
-    logs: list of {"timestamp": datetime, "item": str, "emoji": str}
-    progress_pct: float (0-100) or None to hide marker
+    Renders a compact, robust HTML timeline.
     """
     try:
-        # We need a reference date for the math, use today
         ref_date = datetime.now(EASTERN).date()
         start_dt = datetime.combine(ref_date, datetime.strptime(start_time_str, "%H:%M").time()).replace(tzinfo=EASTERN)
         end_dt = datetime.combine(ref_date, datetime.strptime(end_time_str, "%H:%M").time()).replace(tzinfo=EASTERN)
@@ -154,89 +194,34 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
         emoji_markers = ""
         for log in logs:
             log_ts = log["timestamp"].replace(tzinfo=EASTERN)
-            # Normalize year/month/day for comparison if history log
             log_norm = datetime.combine(ref_date, log_ts.time()).replace(tzinfo=EASTERN)
             
             if start_dt <= log_norm <= end_dt:
-                pos = ((log_norm - start_dt).total_seconds() / total_duration) * 100
-                emoji_markers += f'<div class="timeline-emoji" style="left: {pos}%;" title="{log["item"]}">{log["emoji"]}</div>'
+                pos = max(0, min(100, ((log_norm - start_dt).total_seconds() / total_duration) * 100))
+                emoji = log["emoji"].strip() if log["emoji"] else "🍽️"
+                emoji_markers += f'<div class="timeline-emoji" style="left: {pos:.1f}%;" title="{log["item"]}">{emoji}</div>'
         
         marker_html = ""
         if progress_pct is not None:
-            marker_html = f"""
-            <div class="timeline-progress" style="width: {progress_pct}%;"></div>
-            <div class="timeline-marker" style="left: {progress_pct}%;"></div>
-            """
+            marker_html = f'<div class="timeline-progress" style="width: {progress_pct:.1f}%;"></div><div class="timeline-marker" style="left: {progress_pct:.1f}%;"></div>'
 
-        header_html = f'<div style="font-size: 0.8rem; color: #00A6FF; margin-bottom: 5px; font-weight: 600;">{title}</div>' if title else ""
+        header_html = f'<div style="font-size: 0.85rem; color: #00A6FF; margin-bottom: 2px; font-weight: 700;">{title}</div>' if title else ""
 
-        return f"""
-        <style>
-        .timeline-wrapper {{
-            width: 100%;
-            padding: 20px 0 10px 0;
-            margin-bottom: 25px;
-            position: relative;
-        }}
-        .timeline-bar {{
-            height: 4px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 2px;
-            position: relative;
-            width: 100%;
-        }}
-        .timeline-progress {{
-            position: absolute;
-            height: 100%;
-            background: linear-gradient(90deg, #00A6FF, #00FFCC);
-            border-radius: 2px;
-            box-shadow: 0 0 10px rgba(0, 166, 255, 0.5);
-        }}
-        .timeline-marker {{
-            position: absolute;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            width: 12px;
-            height: 12px;
-            background: white;
-            border: 2px solid #00A6FF;
-            border-radius: 50%;
-            box-shadow: 0 0 8px #00A6FF;
-            z-index: 10;
-        }}
-        .timeline-emoji {{
-            position: absolute;
-            top: -22px;
-            transform: translateX(-50%);
-            font-size: 1.2rem;
-            cursor: help;
-            transition: transform 0.2s;
-            z-index: 5;
-        }}
-        .timeline-emoji:hover {{
-            transform: translateX(-50%) scale(1.3);
-        }}
-        .timeline-labels {{
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.65rem;
-            color: #888;
-            margin-top: 6px;
-            font-family: monospace;
-        }}
-        </style>
-        {header_html}
-        <div class="timeline-wrapper" style="padding-top: 25px;">
-            <div class="timeline-bar">
-                {marker_html}
-                {emoji_markers}
-            </div>
-            <div class="timeline-labels">
-                <span>{start_time_str}</span>
-                <span>{end_time_str}</span>
-            </div>
+        return f'''
+<div style="margin-top: 10px; margin-bottom: 20px;">
+    {header_html}
+    <div class="timeline-wrapper">
+        <div class="timeline-bar">
+            {marker_html}
+            {emoji_markers}
         </div>
-        """
+        <div class="timeline-labels">
+            <span>{start_time_str}</span>
+            <span>{end_time_str}</span>
+        </div>
+    </div>
+</div>
+'''
     except Exception as e:
         return f"<!-- Timeline Error: {e} -->"
 
@@ -324,7 +309,7 @@ def get_logs_for_history(days=10):
                         logs_by_date[date_key] = []
                     
                     item = row[1]
-                    emoji = row[6] if len(row) > 6 else "🍽️"
+                    emoji = row[6].strip() if len(row) > 6 and row[6].strip() else "🍽️"
                     logs_by_date[date_key].append({"timestamp": ts, "item": item, "emoji": emoji})
             except:
                 continue
