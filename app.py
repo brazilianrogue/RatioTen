@@ -139,7 +139,7 @@ def get_client():
 client = get_client()
 
 # --- Database Setup ---
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=600)
 def get_trailing_7_days_data():
     # Define expected columns
     expected_cols = ["Date", "Item", "Calories", "Protein", "Density"]
@@ -188,6 +188,7 @@ def get_trailing_7_days_data():
         st.error(f"Error fetching logs: {e}")
         return pd.DataFrame(columns=expected_cols)
 
+@st.cache_data(ttl=3600)
 def get_lowest_weight():
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
@@ -294,6 +295,7 @@ def log_to_sheet(item, calories, protein, density):
         week_num = f"{year}-W{week:02d}"
         
         worksheet.append_row([today, item, calories, protein, density, week_num])
+        get_trailing_7_days_data.clear()
         return True
     except Exception as e:
         st.error(f"Failed to log to database: {e}")
@@ -302,6 +304,7 @@ def log_to_sheet(item, calories, protein, density):
 # --- Chat Persistence Helpers ---
 CHAT_HISTORY_WS = "Chat_History"
 
+@st.cache_data(ttl=600)
 def get_persistent_chat():
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
@@ -357,6 +360,7 @@ def log_chat_to_sheet(role, content):
                     
         today = datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M:%S")
         worksheet.append_row([today, role, json.dumps(parts)])
+        get_persistent_chat.clear()
     except:
         pass
 
@@ -368,11 +372,12 @@ def clear_persistent_chat():
         worksheet = sh.worksheet(CHAT_HISTORY_WS)
         worksheet.clear()
         worksheet.append_row(["Timestamp", "Role", "Parts"])
+        get_persistent_chat.clear()
         return True
     except:
         return False
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_custom_instructions():
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
