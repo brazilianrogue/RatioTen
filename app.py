@@ -138,6 +138,108 @@ def get_client():
 
 client = get_client()
 
+def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, title=None):
+    """
+    start_time_str, end_time_str: "HH:MM"
+    logs: list of {"timestamp": datetime, "item": str, "emoji": str}
+    progress_pct: float (0-100) or None to hide marker
+    """
+    try:
+        # We need a reference date for the math, use today
+        ref_date = datetime.now(EASTERN).date()
+        start_dt = datetime.combine(ref_date, datetime.strptime(start_time_str, "%H:%M").time()).replace(tzinfo=EASTERN)
+        end_dt = datetime.combine(ref_date, datetime.strptime(end_time_str, "%H:%M").time()).replace(tzinfo=EASTERN)
+        total_duration = (end_dt - start_dt).total_seconds()
+
+        emoji_markers = ""
+        for log in logs:
+            log_ts = log["timestamp"].replace(tzinfo=EASTERN)
+            # Normalize year/month/day for comparison if history log
+            log_norm = datetime.combine(ref_date, log_ts.time()).replace(tzinfo=EASTERN)
+            
+            if start_dt <= log_norm <= end_dt:
+                pos = ((log_norm - start_dt).total_seconds() / total_duration) * 100
+                emoji_markers += f'<div class="timeline-emoji" style="left: {pos}%;" title="{log["item"]}">{log["emoji"]}</div>'
+        
+        marker_html = ""
+        if progress_pct is not None:
+            marker_html = f"""
+            <div class="timeline-progress" style="width: {progress_pct}%;"></div>
+            <div class="timeline-marker" style="left: {progress_pct}%;"></div>
+            """
+
+        header_html = f'<div style="font-size: 0.8rem; color: #00A6FF; margin-bottom: 5px; font-weight: 600;">{title}</div>' if title else ""
+
+        return f"""
+        <style>
+        .timeline-wrapper {{
+            width: 100%;
+            padding: 20px 0 10px 0;
+            margin-bottom: 25px;
+            position: relative;
+        }}
+        .timeline-bar {{
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            position: relative;
+            width: 100%;
+        }}
+        .timeline-progress {{
+            position: absolute;
+            height: 100%;
+            background: linear-gradient(90deg, #00A6FF, #00FFCC);
+            border-radius: 2px;
+            box-shadow: 0 0 10px rgba(0, 166, 255, 0.5);
+        }}
+        .timeline-marker {{
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 12px;
+            height: 12px;
+            background: white;
+            border: 2px solid #00A6FF;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #00A6FF;
+            z-index: 10;
+        }}
+        .timeline-emoji {{
+            position: absolute;
+            top: -22px;
+            transform: translateX(-50%);
+            font-size: 1.2rem;
+            cursor: help;
+            transition: transform 0.2s;
+            z-index: 5;
+        }}
+        .timeline-emoji:hover {{
+            transform: translateX(-50%) scale(1.3);
+        }}
+        .timeline-labels {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.65rem;
+            color: #888;
+            margin-top: 6px;
+            font-family: monospace;
+        }}
+        </style>
+        {header_html}
+        <div class="timeline-wrapper" style="padding-top: 25px;">
+            <div class="timeline-bar">
+                {marker_html}
+                {emoji_markers}
+            </div>
+            <div class="timeline-labels">
+                <span>{start_time_str}</span>
+                <span>{end_time_str}</span>
+            </div>
+        </div>
+        """
+    except Exception as e:
+        return f"<!-- Timeline Error: {e} -->"
+
 # --- Database Setup ---
 @st.cache_data(ttl=600)
 def get_trailing_7_days_data():
@@ -190,6 +292,10 @@ def get_trailing_7_days_data():
 
 @st.cache_data(ttl=60)
 def get_today_log_for_timeline():
+    return get_logs_for_history(days=0)
+
+@st.cache_data(ttl=300)
+def get_logs_for_history(days=10):
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
@@ -198,24 +304,38 @@ def get_today_log_for_timeline():
         
         values = worksheet.get_all_values()
         if len(values) <= 1:
-            return []
+            return [] if days == 0 else {}
             
-        today_str = datetime.now(EASTERN).strftime("%Y-%m-%d")
-        logs = []
+        now = datetime.now(EASTERN)
+        cutoff_date = (now - timedelta(days=days)).date()
+        
+        logs_by_date = {}
+        
         for row in values[1:]:
             if len(row) < 2: continue
             ts_str = row[0]
-            if ts_str.startswith(today_str):
-                try:
-                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            try:
+                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                log_date = ts.date()
+                
+                if log_date >= cutoff_date:
+                    date_key = log_date.strftime("%Y-%m-%d")
+                    if date_key not in logs_by_date:
+                        logs_by_date[date_key] = []
+                    
                     item = row[1]
                     emoji = row[6] if len(row) > 6 else "🍽️"
-                    logs.append({"timestamp": ts, "item": item, "emoji": emoji})
-                except:
-                    continue
-        return logs
+                    logs_by_date[date_key].append({"timestamp": ts, "item": item, "emoji": emoji})
+            except:
+                continue
+        
+        if days == 0:
+            today_key = now.strftime("%Y-%m-%d")
+            return logs_by_date.get(today_key, [])
+            
+        return logs_by_date
     except:
-        return []
+        return [] if days == 0 else {}
 
 @st.cache_data(ttl=600)
 def get_wow_data(enable_demo=False):
@@ -786,80 +906,7 @@ if st.session_state.view_selection == "🍽️ Log":
                 
                 # Fetch today's food logs for timeline
                 today_logs = get_today_log_for_timeline()
-                emoji_markers = ""
-                for log in today_logs:
-                    log_ts = log["timestamp"].replace(tzinfo=EASTERN)
-                    if start_dt <= log_ts <= end_dt:
-                        pos = ((log_ts - start_dt).total_seconds() / total_duration) * 100
-                        emoji_markers += f'<div class="timeline-emoji" style="left: {pos}%;" title="{log["item"]}">{log["emoji"]}</div>'
-                
-                timeline_html = f"""
-                <style>
-                .timeline-wrapper {{
-                    width: 100%;
-                    padding: 20px 0 10px 0;
-                    margin-bottom: 10px;
-                    position: relative;
-                }}
-                .timeline-bar {{
-                    height: 4px;
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 2px;
-                    position: relative;
-                    width: 100%;
-                }}
-                .timeline-progress {{
-                    position: absolute;
-                    height: 100%;
-                    background: linear-gradient(90deg, #00A6FF, #00FFCC);
-                    border-radius: 2px;
-                    box-shadow: 0 0 10px rgba(0, 166, 255, 0.5);
-                }}
-                .timeline-marker {{
-                    position: absolute;
-                    top: 50%;
-                    transform: translate(-50%, -50%);
-                    width: 12px;
-                    height: 12px;
-                    background: white;
-                    border: 2px solid #00A6FF;
-                    border-radius: 50%;
-                    box-shadow: 0 0 8px #00A6FF;
-                    z-index: 10;
-                }}
-                .timeline-emoji {{
-                    position: absolute;
-                    top: -22px;
-                    transform: translateX(-50%);
-                    font-size: 1.2rem;
-                    cursor: help;
-                    transition: transform 0.2s;
-                    z-index: 5;
-                }}
-                .timeline-emoji:hover {{
-                    transform: translateX(-50%) scale(1.3);
-                }}
-                .timeline-labels {{
-                    display: flex;
-                    justify-content: space-between;
-                    font-size: 0.65rem;
-                    color: #888;
-                    margin-top: 6px;
-                    font-family: monospace;
-                }}
-                </style>
-                <div class="timeline-wrapper">
-                    <div class="timeline-bar">
-                        <div class="timeline-progress" style="width: {progress_pct}%;"></div>
-                        <div class="timeline-marker" style="left: {progress_pct}%;"></div>
-                        {emoji_markers}
-                    </div>
-                    <div class="timeline-labels">
-                        <span>{sched["start"]}</span>
-                        <span>{sched["end"]}</span>
-                    </div>
-                </div>
-                """
+                timeline_html = render_timeline_html(sched["start"], sched["end"], today_logs, progress_pct=progress_pct)
                 st.markdown(timeline_html, unsafe_allow_html=True)
             except Exception as e:
                 pass # Fail silently for UI element
@@ -1135,6 +1182,32 @@ else:
         st.info("Insufficient data for Week-over-Week trends. Start logging to build your history!")
     
     st.divider()
+    
+    # --- 8. Timeline History Section (New) ---
+    with st.expander("⏳ Timeline History", expanded=False):
+        st.markdown("### Previous 10 Days")
+        history_logs = get_logs_for_history(days=10)
+        
+        # Sort dates descending (exclude today if active)
+        today_key = datetime.now(EASTERN).strftime("%Y-%m-%d")
+        sorted_dates = sorted([d for d in history_logs.keys() if d != today_key], reverse=True)
+        
+        if not sorted_dates:
+            st.info("No historical log data available yet.")
+        else:
+            for date_str in sorted_dates:
+                # Get schedule for that day
+                dt_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                day_name = dt_obj.strftime("%A")
+                sched = fasting_schedule.get(day_name, {"start": "12:00", "end": "18:00"})
+                
+                day_logs = history_logs[date_str]
+                if sched["start"] and sched["end"]:
+                    st.markdown(f"**{date_str} ({day_name})**")
+                    html = render_timeline_html(sched["start"], sched["end"], day_logs, title=None)
+                    st.markdown(html, unsafe_allow_html=True)
+                    st.divider()
+
     st.info("💡 Strategic tip: Use the '🍽️ Log' view to add data for today!")
 
     # End of view-specific content
