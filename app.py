@@ -866,6 +866,10 @@ else:
         plot_df['Date'] = pd.to_datetime(plot_df['Date'])
         plot_df = plot_df.sort_values('Date')
         
+        # Exclude today's data as it's partial and skews scaling
+        today_date = datetime.now(EASTERN).date()
+        plot_df = plot_df[plot_df['Date'].dt.date < today_date]
+        
         # Force day-level granularity by converting back to string for the index
         plot_df['Date_Label'] = plot_df['Date'].dt.strftime('%b %d')
         
