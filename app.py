@@ -57,9 +57,50 @@ def get_chat_session(model_id, system_prompt, history=None):
     )
 
 st.markdown("""
-    <style>
+<style>
+    /* Hide the Streamlit Header completely */
+    header[data-testid="stHeader"], [data-testid="stHeader"] {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+    }
+    
+    /* Remove the default Streamlit padding for extreme compactness */
+    .block-container {
+        padding-top: 0rem !important;
+        padding-bottom: 0rem !important;
+        margin-top: -50px !important;
+    }
+
+    /* Target the gaps between blocks */
+    div[data-testid="stVerticalBlock"] {
+        gap: 0px !important;
+    }
+
+    /* Specific override for the custom nav container spacing */
+    div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHtml"]) {
+        margin-bottom: -30px !important;
+        margin-top: -10px !important;
+    }
+
+    /* Robustly hide the H_ bridge buttons and their containers */
+    div[data-testid="stBaseButton-secondary"]:has(p:contains("H_")),
+    div[data-testid="stHorizontalBlock"] > div:has(button p:contains("H_")),
+    div.stButton:has(button p:contains("H_")),
+    button[kind="secondary"]:has(p:contains("H_")) {
+        display: none !important;
+        height: 0 !important;
+        width: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        visibility: hidden !important;
+    }
+    div[data-testid="stVerticalBlock"] > div:has(button p:contains("H_")) {
+        display: none !important;
+    }
+    
     .main {
-        background-color: #f8f9fa;
+        background-color: #0e1117;
     }
     div[data-testid="stExpander"] {
         border: none !important;
@@ -69,14 +110,6 @@ st.markdown("""
     .stButton button {
         border-radius: 20px;
         font-weight: 600;
-    }
-    header[data-testid="stHeader"] {
-        background: #1E1E1E !important;
-        color: #00A6FF !important;
-        border-bottom: 1px solid #00A6FF;
-    }
-    header[data-testid="stHeader"] * {
-        color: #00A6FF !important;
     }
     /* Custom Dashboard CSS */
     .metric-container {
@@ -1002,15 +1035,25 @@ nav_html = f"""
   
   // Inject theme color into parent head
   (function() {{
-      const meta = window.parent.document.createElement('meta');
-      meta.name = "theme-color";
-      meta.content = "#161821";
-      window.parent.document.getElementsByTagName('head')[0].appendChild(meta);
+      const parentHead = window.parent.document.getElementsByTagName('head')[0];
       
-      const appleMeta = window.parent.document.createElement('meta');
-      appleMeta.name = "apple-mobile-web-app-status-bar-style";
+      // Theme color for browser bars
+      let meta = window.parent.document.querySelector('meta[name="theme-color"]');
+      if (!meta) {{
+          meta = window.parent.document.createElement('meta');
+          meta.name = "theme-color";
+          parentHead.appendChild(meta);
+      }}
+      meta.content = "#161821";
+      
+      // Apple status bar style
+      let appleMeta = window.parent.document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (!appleMeta) {{
+          appleMeta = window.parent.document.createElement('meta');
+          appleMeta.name = "apple-mobile-web-app-status-bar-style";
+          parentHead.appendChild(appleMeta);
+      }}
       appleMeta.content = "black-translucent";
-      window.parent.document.getElementsByTagName('head')[0].appendChild(appleMeta);
   }})();
 
   // Hide the invisible Streamlit buttons in the parent DOM
@@ -1060,50 +1103,14 @@ nav_html = f"""
 </body>
 </html>
 """
-components.html(nav_html, height=85)
+components.html(nav_html, height=72)
 
 # Hidden callback bridge
 def set_view(view):
     st.session_state.view_selection = view
 
-st.markdown("""
-<style>
-/* Hide the Streamlit Header (GitHub, Fork, Menu) */
-header[data-testid="stHeader"] {{
-    visibility: hidden !important;
-    height: 0 !important;
-}}
+# No more duplicate CSS block here
 
-/* Extreme Compactness: Remove padding from the main container */
-.block-container {{
-    padding-top: 0rem !important;
-    padding-bottom: 0rem !important;
-    margin-top: -30px !important;
-}}
-
-/* Reduce gap between the custom nav iframe and the dashboard */
-div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHtml"]) {{
-    margin-bottom: -40px !important;
-}}
-
-/* Robustly hide the H_ bridge buttons and their containers */
-div[data-testid="stBaseButton-secondary"]:has(p:contains("H_")),
-div[data-testid="stHorizontalBlock"] > div:has(button p:contains("H_")),
-div.stButton:has(button p:contains("H_")),
-button[kind="secondary"]:has(p:contains("H_")) {{
-    display: none !important;
-    height: 0 !important;
-    width: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    visibility: hidden !important;
-}}
-/* Also target the vertical block spacing */
-div[data-testid="stVerticalBlock"] > div:has(button p:contains("H_")) {{
-    display: none !important;
-}}
-</style>
-""", unsafe_allow_html=True)
 
 with st.container():
     if st.button("H_LOG", on_click=set_view, args=("🍽️ Log",)): pass
