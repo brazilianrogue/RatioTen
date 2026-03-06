@@ -206,8 +206,41 @@ st.markdown("""
         margin-top: 8px;
         font-family: monospace;
     }
+    
+    /* Section Header Styles */
+    .section-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 25px;
+        margin-bottom: 15px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .section-header svg {
+        color: #fca311; /* Tixx yellow */
+        width: 22px;
+        height: 22px;
+    }
+    .section-header span {
+        color: white;
+        font-size: 1.1rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+    }
     </style>
     """, unsafe_allow_html=True)
+
+def render_section_header(icon_svg, title):
+    """Renders a premium, consistent section header."""
+    header_html = f"""
+    <div class="section-header">
+        {icon_svg}
+        <span>{title}</span>
+    </div>
+    """
+    st.markdown(header_html, unsafe_allow_html=True)
 
 # Inject theme color and status bar style into the head of the main document
 components.html("""
@@ -1482,11 +1515,11 @@ if st.session_state.view_selection == "🍽️ Log":
 
 elif st.session_state.view_selection == "📊 Analyze":
     # --- Analytics View ---
-    st.subheader("📊 Performance Analytics")
+    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>', "Performance Analytics")
     df_7days = get_trailing_7_days_data()
 
     # Weekly History Table
-    st.markdown("#### Trailing 7 Days")
+    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>', "Trailing 7 Days")
     if not df_7days.empty:
         st.dataframe(df_7days, width="stretch", hide_index=True)
     else:
@@ -1494,8 +1527,7 @@ elif st.session_state.view_selection == "📊 Analyze":
 
     # Data Visualization Tool
     if not df_7days.empty:
-        st.divider()
-        st.markdown("#### Performance Trends")
+        render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trending-up"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>', "Performance Trends")
         
         # Prepare data for plotting
         plot_df = df_7days.copy()
@@ -1535,8 +1567,7 @@ elif st.session_state.view_selection == "📊 Analyze":
             st.info("Select at least one metric to visualize the trend.")
     
     # --- Week-over-Week Analytics ---
-    st.divider()
-    st.subheader("🗓️ Week-over-Week Performance")
+    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-calendar"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', "Week-over-Week Performance")
     
     # Fetch WoW Data (handle demo mode)
     enable_demo = st.session_state.get("enable_demo", False)
@@ -1544,10 +1575,10 @@ elif st.session_state.view_selection == "📊 Analyze":
     
     if not df_wow.empty:
         # WoW History Table
-        st.markdown("#### Weekly Averages")
+        render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-list"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', "Weekly Averages")
         st.dataframe(df_wow[["Week", "Avg Calories", "Avg Protein", "Density"]], width="stretch", hide_index=True)
         
-        st.markdown("#### Weekly Trends")
+        render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-line-chart"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>', "Weekly Trends")
         # Reuse same metric selection logic for WoW
         metrics_wow = ["Avg Calories", "Avg Protein", "Density_Val"]
         selected_metrics_wow = st.multiselect(
@@ -1573,11 +1604,9 @@ elif st.session_state.view_selection == "📊 Analyze":
     else:
         st.info("Insufficient data for Week-over-Week trends. Start logging to build your history!")
     
-    st.divider()
-    
     # --- 8. Timeline History Section (New) ---
     with st.expander("⏳ Timeline History", expanded=False):
-        st.markdown("### Previous 10 Days")
+        render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-history"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>', "Previous 10 Days")
         history_logs = get_logs_for_history(days=10)
         
         # Sort dates descending (exclude today if active)
@@ -1603,7 +1632,7 @@ elif st.session_state.view_selection == "📊 Analyze":
     st.info("💡 Strategic tip: Use the '🍽️ Log' view to add data for today!")
 
 elif st.session_state.view_selection == "⚙️ Plan":
-    st.subheader("⚙️ RatioTen Protocol Plan")
+    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>', "Protocol Plan")
     
     # 1. Effectiveness Score
     score, msg = calculate_plan_effectiveness()
@@ -1630,10 +1659,8 @@ elif st.session_state.view_selection == "⚙️ Plan":
     else:
         st.info(f"📊 Effectiveness Calibrating: {msg}")
 
-    st.divider()
-
     # 2. Goal Editor
-    st.markdown("#### 🎯 Daily Targets")
+    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-target"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>', "Daily Targets")
     with st.form("goals_form"):
         col_c, col_p = st.columns(2)
         with col_c:
@@ -1652,10 +1679,8 @@ elif st.session_state.view_selection == "⚙️ Plan":
             else:
                 st.error("Failed to save goals.")
 
-    st.divider()
-
     # 3. Schedule Editor
-    st.markdown("#### ⏳ Fasting Schedule")
+    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>', "Fasting Schedule")
     with st.form("schedule_form"):
         days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         new_schedule = {}
@@ -1689,7 +1714,7 @@ elif st.session_state.view_selection == "⚙️ Plan":
     
     # 4. Advanced Settings
     with st.expander("🛠️ Advanced", expanded=False):
-        st.markdown("#### Data Management")
+        render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-database"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>', "Data Management")
         st.info("If the AI's tone feels off or you want to start a fresh interaction, you can clear the conversation history here.")
         if st.button("Clear Chat History", type="secondary", use_container_width=True):
             if clear_persistent_chat():
