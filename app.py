@@ -65,22 +65,22 @@ st.markdown("""
         height: 0 !important;
     }
     
-    /* Remove the default Streamlit padding for extreme compactness */
+    /* Reduce the default Streamlit padding for better vertical use */
     .block-container {
-        padding-top: 0rem !important;
+        padding-top: 2rem !important; /* Some padding to avoid clipping at the very top */
         padding-bottom: 0rem !important;
-        margin-top: -50px !important;
+        margin-top: 0px !important;
     }
 
     /* Target the gaps between blocks */
     div[data-testid="stVerticalBlock"] {
-        gap: 0px !important;
+        gap: 10px !important; /* Added 10px spacing as requested */
     }
 
     /* Specific override for the custom nav container spacing */
     div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHtml"]) {
-        margin-bottom: -30px !important;
-        margin-top: -10px !important;
+        margin-bottom: 0px !important;
+        margin-top: 0px !important;
     }
 
     /* Robustly hide the H_ bridge buttons and their containers */
@@ -207,6 +207,39 @@ st.markdown("""
         font-family: monospace;
     }
     </style>
+    <script>
+        // Inject theme color and status bar style into the head of the main document
+        (function() {
+            const head = document.head;
+            
+            // Theme color for browser bars / status bar background
+            let meta = document.querySelector('meta[name="theme-color"]');
+            if (!meta) {
+                meta = document.createElement('meta');
+                meta.name = "theme-color";
+                head.appendChild(meta);
+            }
+            meta.content = "#161821";
+            
+            // Apple status bar style - black-translucent makes it use the theme color effectively
+            let appleMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+            if (!appleMeta) {
+                appleMeta = document.createElement('meta');
+                appleMeta.name = "apple-mobile-web-app-status-bar-style";
+                head.appendChild(appleMeta);
+            }
+            appleMeta.content = "black-translucent";
+            
+            // Also set apple-mobile-web-app-capable to true for standalone feel
+            let capableMeta = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
+            if (!capableMeta) {
+                capableMeta = document.createElement('meta');
+                capableMeta.name = "apple-mobile-web-app-capable";
+                head.appendChild(capableMeta);
+            }
+            capableMeta.content = "yes";
+        })();
+    </script>
     """, unsafe_allow_html=True)
 
 # --- 2. API Setup ---
@@ -1033,28 +1066,7 @@ nav_html = f"""
     }});
   }}
   
-  // Inject theme color into parent head
-  (function() {{
-      const parentHead = window.parent.document.getElementsByTagName('head')[0];
-      
-      // Theme color for browser bars
-      let meta = window.parent.document.querySelector('meta[name="theme-color"]');
-      if (!meta) {{
-          meta = window.parent.document.createElement('meta');
-          meta.name = "theme-color";
-          parentHead.appendChild(meta);
-      }}
-      meta.content = "#161821";
-      
-      // Apple status bar style
-      let appleMeta = window.parent.document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-      if (!appleMeta) {{
-          appleMeta = window.parent.document.createElement('meta');
-          appleMeta.name = "apple-mobile-web-app-status-bar-style";
-          parentHead.appendChild(appleMeta);
-      }}
-      appleMeta.content = "black-translucent";
-  }})();
+  // Bridge is now handled in the main st.markdown block for cleaner scope
 
   // Hide the invisible Streamlit buttons in the parent DOM
   setInterval(() => {{
