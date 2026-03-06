@@ -930,9 +930,9 @@ nav_html = f"""
     background-color: transparent;
   }}
   .nav-bar {{
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     background-color: #161821; /* Dark Tixx like */
     border-radius: 12px;
     padding: 0 20px;
@@ -942,7 +942,6 @@ nav_html = f"""
   .nav-left {{
     display: flex;
     align-items: center;
-    grid-column: 1;
   }}
   .nav-left img {{
     height: 32px;
@@ -955,9 +954,8 @@ nav_html = f"""
     letter-spacing: 0.5px;
   }}
   .nav-items {{
-    grid-column: 2;
     display: flex;
-    gap: 30px; /* balanced and centered */
+    gap: 30px; 
   }}
   .nav-item {{
     display: flex;
@@ -990,9 +988,6 @@ nav_html = f"""
   }}
   .nav-item.active svg {{
     stroke: #fca311;
-  }}
-  .nav-right {{
-    grid-column: 3;
   }}
 </style>
 <script>
@@ -1041,7 +1036,6 @@ nav_html = f"""
         <span>Plan</span>
       </div>
     </div>
-    <div class="nav-right"></div>
   </div>
 </body>
 </html>
@@ -1055,9 +1049,20 @@ def set_view(view):
 st.markdown("""
 <style>
 /* Robustly hide the H_ bridge buttons and their containers */
+/* Use various selectors to ensure we catch the Streamlit button layout */
 div[data-testid="stBaseButton-secondary"]:has(p:contains("H_")),
 div[data-testid="stHorizontalBlock"] > div:has(button p:contains("H_")),
-div.stButton:has(button p:contains("H_")) {
+div.stButton:has(button p:contains("H_")),
+button[kind="secondary"]:has(p:contains("H_")) {
+    display: none !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    visibility: hidden !important;
+}
+/* Also target the vertical block spacing */
+div[data-testid="stVerticalBlock"] > div:has(button p:contains("H_")) {
     display: none !important;
 }
 </style>
