@@ -35,6 +35,9 @@ if "pending_image" not in st.session_state:
 if "view_selection" not in st.session_state:
     st.session_state.view_selection = "🍽️ Log"
 
+if "show_timeline_always" not in st.session_state:
+    st.session_state.show_timeline_always = False
+
 # --- Function Definitions ---
 @st.cache_resource
 def get_chat_session(model_id, system_prompt, history=None):
@@ -156,7 +159,7 @@ st.markdown("""
     /* Timeline styles */
     .timeline-wrapper {
         width: 100%;
-        padding: 25px 0 10px 0;
+        padding: 45px 0 10px 0; /* Increased top padding for staggering */
         margin-bottom: 25px;
         position: relative;
     }
@@ -188,15 +191,28 @@ st.markdown("""
     }
     .timeline-emoji {
         position: absolute;
-        top: -24px;
-        transform: translateX(-50%);
+        transform: translate(-50%, -100%); /* Position above the bar */
         font-size: 1.3rem;
         cursor: help;
-        transition: transform 0.2s;
+        transition: all 0.2s;
         z-index: 5;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .timeline-emoji::after {
+        content: '';
+        width: 1px;
+        height: 8px; /* Connecting stem */
+        background: rgba(255, 255, 255, 0.2);
+        margin-top: 2px;
     }
     .timeline-emoji:hover {
-        transform: translateX(-50%) scale(1.4);
+        transform: translate(-50%, -100%) scale(1.4);
+        z-index: 20;
+    }
+    .timeline-emoji:hover::after {
+        background: #00A6FF;
     }
     .timeline-labels {
         display: flex;
@@ -318,7 +334,7 @@ client = get_client()
 
 def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, title=None):
     """
-    Renders a compact, robust HTML timeline.
+    Renders a compact, robust HTML timeline with vertical staggering.
     """
     try:
         ref_date = datetime.now(EASTERN).date()
@@ -326,8 +342,13 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
         end_dt = datetime.combine(ref_date, datetime.strptime(end_time_str, "%H:%M").time()).replace(tzinfo=EASTERN)
         total_duration = (end_dt - start_dt).total_seconds()
 
+        # Sort logs by timestamp for staggered logic
+        sorted_logs = sorted(logs, key=lambda x: x["timestamp"])
+
         emoji_markers = ""
-        for log in logs:
+        lanes = [] # Tracks the rightmost position used in each lane
+
+        for log in sorted_logs:
             log_ts = log["timestamp"].replace(tzinfo=EASTERN)
             log_norm = datetime.combine(ref_date, log_ts.time()).replace(tzinfo=EASTERN)
             
@@ -349,7 +370,31 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
             if is_valid:
                 pos = max(0.0, min(100.0, pos))
                 emoji = log["emoji"].strip() if log["emoji"] else "🍽️"
-                emoji_markers += f'<div class="timeline-emoji" style="left: {pos:.1f}%;" title="{log["item"]}">{emoji}</div>'
+                
+                # Determine vertical lane (staggering)
+                lane_index = 0
+                threshold = 8.0 # % width threshold for overlap
+                
+                for i, right_edge in enumerate(lanes):
+                    if pos > right_edge + threshold:
+                        lane_index = i
+                        lanes[i] = pos
+                        break
+                else:
+                    lane_index = len(lanes)
+                    lanes.append(pos)
+                
+                # Dynamic top position based on lane (starting from -5px up to -45px)
+                top_offset = -5 - (lane_index * 20)
+                
+                # Edge alignment: ensure emojis at the ends don't get cut off
+                align_style = f"left: {pos:.1f}%; top: {top_offset}px;"
+                if pos < 5:
+                    align_style += " transform: translate(0, -100%);"
+                elif pos > 95:
+                    align_style += " transform: translate(-100%, -100%);"
+
+                emoji_markers += f'<div class="timeline-emoji" style="{align_style}" title="{log["item"]}">{emoji}</div>'
         
         marker_html = ""
         if progress_pct is not None:
@@ -1321,6 +1366,18 @@ if st.session_state.view_selection == "🍽️ Log":
                 st.markdown(timeline_html, unsafe_allow_html=True)
             except Exception as e:
                 pass # Fail silently for UI element
+    elif st.session_state.get("show_timeline_always", False):
+        # Developer override to show timeline during fasting
+        now = datetime.now(EASTERN)
+        day_name = now.strftime("%A")
+        sched = fasting_schedule.get(day_name, {"start": "12:00", "end": "18:00"})
+        if sched["start"] and sched["end"]:
+            try:
+                today_logs = get_today_log_for_timeline()
+                timeline_html = render_timeline_html(sched["start"], sched["end"], today_logs, title="Timeline Override (Developer Mode)")
+                st.markdown(timeline_html, unsafe_allow_html=True)
+            except:
+                pass
 
     # --- 5. Initialize Chat History & Session State (Log View Only) ---
     if "messages" not in st.session_state or not st.session_state.messages:
@@ -1710,6 +1767,18 @@ elif st.session_state.view_selection == "⚙️ Plan":
     
     # 4. Advanced Settings
     with st.expander("🛠️ Advanced", expanded=False):
+        st.markdown("#### 🛠️ Developer Tools")
+        show_always = st.checkbox(
+            "Always Show Food Timeline (Home Page) [NEW]",
+            value=st.session_state.get("show_timeline_always", False),
+            help="Force the food timeline to be visible on the home page even during fasting windows."
+        )
+        if show_always != st.session_state.get("show_timeline_always", False):
+            st.session_state.show_timeline_always = show_always
+            st.rerun()
+
+        st.divider()
+
         render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-database"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>', "Data Management")
         st.info("If the AI's tone feels off or you want to start a fresh interaction, you can clear the conversation history here.")
         if st.button("Clear Chat History", type="secondary", use_container_width=True):
