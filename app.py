@@ -213,37 +213,53 @@ st.markdown("""
 components.html("""
     <script>
         (function() {
-            function applyTheme() {
+            function applyPWATheme() {
                 try {
                     const targets = [document, window.parent.document];
                     targets.forEach(doc => {
-                        let meta = doc.querySelector('meta[name="theme-color"]');
-                        if (!meta) {
-                            meta = doc.createElement('meta');
-                            meta.name = "theme-color";
-                            doc.head.appendChild(meta);
+                        // 1. App Capability
+                        let capable = doc.querySelector('meta[name="apple-mobile-web-app-capable"]');
+                        if (!capable) {
+                            capable = doc.createElement('meta');
+                            capable.name = "apple-mobile-web-app-capable";
+                            doc.head.appendChild(capable);
                         }
-                        meta.content = "#161821";
+                        capable.content = "yes";
 
+                        // 2. Status Bar Style - "black" is often more reliable than translucent for fixed bars
                         let appleMeta = doc.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
                         if (!appleMeta) {
                             appleMeta = doc.createElement('meta');
                             appleMeta.name = "apple-mobile-web-app-status-bar-style";
                             doc.head.appendChild(appleMeta);
                         }
-                        appleMeta.content = "black-translucent";
+                        appleMeta.content = "black"; 
 
-                        // Set body background of parent to match
+                        // 3. Theme Color
+                        let themeMeta = doc.querySelector('meta[name="theme-color"]');
+                        if (!themeMeta) {
+                            themeMeta = doc.createElement('meta');
+                            themeMeta.name = "theme-color";
+                            doc.head.appendChild(themeMeta);
+                        }
+                        themeMeta.content = "#161821";
+
+                        // 4. Force Parent Backgrounds to match app theme
+                        if (doc.documentElement) doc.documentElement.style.backgroundColor = "#161821";
                         if (doc.body) doc.body.style.backgroundColor = "#161821";
                     });
-                } catch (e) { console.log("Status bar injection limited by cross-origin policy"); }
+                } catch (e) {
+                    console.log("PWA theme injection restricted or failed:", e);
+                }
             }
-            
-            applyTheme();
-            // Repeat a few times to ensure it sticks after Streamlit hydration
-            setTimeout(applyTheme, 500);
-            setTimeout(applyTheme, 1000);
-            setTimeout(applyTheme, 3000);
+
+            // Execute immediately and then repeatedly to battle Streamlit's DOM cycles
+            applyPWATheme();
+            let count = 0;
+            const interval = setInterval(() => {
+                applyPWATheme();
+                if (count++ > 5) clearInterval(interval);
+            }, 1000);
         })();
     </script>
     """, height=0, width=0)
