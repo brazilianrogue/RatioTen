@@ -602,8 +602,11 @@ def get_logs_for_history(days=10):
                         logs_by_date[date_key] = []
                     
                     item = str(row[1])
+                    calories = int(float(row[2])) if len(row) > 2 and str(row[2]).strip() else 0
+                    protein = int(float(row[3])) if len(row) > 3 and str(row[3]).strip() else 0
+                    density = str(row[4]).strip() if len(row) > 4 and str(row[4]).strip() else "0.0%"
                     emoji = str(row[6]).strip() if len(row) > 6 and str(row[6]).strip() else "🍽️"
-                    logs_by_date[date_key].append({"timestamp": ts, "item": item, "emoji": emoji})
+                    logs_by_date[date_key].append({"timestamp": ts, "item": item, "calories": calories, "protein": protein, "density": density, "emoji": emoji})
             except:
                 continue
         
@@ -1136,10 +1139,16 @@ def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None,
 
     logs_context = ""
     if today_logs:
-        logs_text = "\n".join([f"- {log['item']} ({log['emoji']})" for log in today_logs])
+        logs_rows = "\n".join([
+            f"| {log['item']} ({log['emoji']}) | {log.get('calories', 0)} | {log.get('protein', 0)} | {log.get('density', '0.0%')} |"
+            for log in today_logs
+        ])
         logs_context = f"""
 ### TODAY'S EXPLICIT FOOD LOGS:
-{logs_text}
+Use this as the authoritative source for all logged items and their macros today. Do NOT hallucinate or recall macros from earlier in the conversation — always use these values.
+
+| Item | Calories | Protein (g) | Density |
+|------|----------|-------------|---------|\n{logs_rows}
 """
 
     weekly_context = ""
