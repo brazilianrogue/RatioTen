@@ -1779,6 +1779,84 @@ elif st.session_state.view_selection == "📊 Analyze":
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>', "Performance Analytics")
     df_7days = get_trailing_7_days_data()
 
+    # --- Plan Effectiveness ---
+    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-gauge"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>', "Plan Effectiveness")
+    score, msg, drivers = calculate_plan_effectiveness()
+    if score is not None:
+        color = "#00A6FF"
+        if score < 5: color = "#dc3545"
+        elif score < 8: color = "#ffc107"
+        rotation = (score / 10.0) * 180 - 90
+        gauge_html = f"""
+        <div style="text-align: center; margin: 30px 0;">
+            <div style="font-size: 0.9rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">Plan Effectiveness Score</div>
+            <div style="position: relative; width: 250px; height: 125px; margin: 0 auto; overflow: hidden;">
+                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid #333; border-bottom-color: transparent; border-left-color: transparent; transform: rotate(135deg);"></div>
+                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid {color}; border-bottom-color: transparent; border-left-color: transparent; transform: rotate({rotation+45}deg); transition: transform 1s ease-out; box-shadow: 0 0 15px {color} inset;"></div>
+                <div style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: 3rem; font-weight: 800; color: white;">{score:.1f}</div>
+            </div>
+            <div style="font-size: 0.8rem; color: #aaa; margin-top: 5px;">Based on 14-day adherence &amp; record low weight</div>
+        </div>
+        """
+        st.markdown(gauge_html, unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("How is this calculated?", use_container_width=True, type="tertiary", key="eff_modal_stats"):
+                show_effectiveness_modal()
+
+        st.markdown("""
+        <style>
+        .driver-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
+        .driver-card { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 15px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+        .driver-icon { width: 24px; height: 24px; margin: 0 auto 8px; display: block; color: #fca311; stroke: #fca311; }
+        .driver-label { font-size: 0.75rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+        .driver-value { font-size: 1.1rem; font-weight: 700; color: white; margin-top: 2px; }
+        .driver-status { font-size: 0.7rem; margin-top: 5px; font-weight: 600; }
+        .status-ok { color: #00FFC2; } .status-warn { color: #FFC107; } .status-crit { color: #FF4B4B; }
+        .coach-tip { background: linear-gradient(90deg, rgba(0,166,255,0.1), rgba(0,255,194,0.1)); border-left: 4px solid #00A6FF; padding: 15px; border-radius: 8px; margin-top: 10px; }
+        </style>
+        """, unsafe_allow_html=True)
+
+        adherence_pct = (drivers['adherent_days'] / drivers['total_days']) * 100
+        adherence_status = "status-ok" if adherence_pct >= 85 else ("status-warn" if adherence_pct >= 70 else "status-crit")
+        adherence_msg = "Optimal" if adherence_pct >= 85 else ("Inconsistent" if adherence_pct >= 70 else "Needs Focus")
+        density_status = "status-ok" if drivers['avg_density'] >= 10.5 else ("status-warn" if drivers['avg_density'] >= 9.5 else "status-crit")
+        density_msg = "Lean" if drivers['avg_density'] >= 10.5 else ("Moderate" if drivers['avg_density'] >= 9.5 else "Improve")
+        weight_status = "status-ok" if drivers['weight_shift'] >= 0.8 else ("status-warn" if drivers['weight_shift'] >= 0 else "status-crit")
+        weight_msg = "Losing" if drivers['weight_shift'] >= 0.8 else ("Steady" if drivers['weight_shift'] >= 0 else "Gaining")
+        logging_pct = (drivers['total_days'] / 14) * 100
+        logging_status = "status-ok" if logging_pct >= 80 else ("status-warn" if logging_pct >= 60 else "status-crit")
+        logging_msg = "Reliable" if logging_pct >= 80 else ("Partial" if logging_pct >= 60 else "Incomplete")
+
+        icon_check = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+        icon_zap   = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
+        icon_trend = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>'
+        icon_clip  = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>'
+
+        drivers_html = f"""
+        <div class="driver-grid">
+            <div class="driver-card">{icon_check}<div class="driver-label">Protocol Success</div><div class="driver-value">{drivers['adherent_days']}/{drivers['total_days']} Days</div><div class="driver-status {adherence_status}">{adherence_msg}</div></div>
+            <div class="driver-card">{icon_zap}<div class="driver-label">Avg Protein</div><div class="driver-value">{drivers['avg_density']:.1f}%</div><div class="driver-status {density_status}">{density_msg}</div></div>
+            <div class="driver-card">{icon_trend}<div class="driver-label">Scale Velocity</div><div class="driver-value">{drivers['weight_shift']:+.1f} lbs</div><div class="driver-status {weight_status}">{weight_msg}</div></div>
+            <div class="driver-card">{icon_clip}<div class="driver-label">Logging Rank</div><div class="driver-value">{int(logging_pct)}%</div><div class="driver-status {logging_status}">{logging_msg}</div></div>
+        </div>
+        """
+        st.markdown(drivers_html, unsafe_allow_html=True)
+
+        tip_text = "Your plan is perfectly calibrated! Maintain this consistency to reach your goal."
+        if logging_pct < 70:
+            tip_text = "💡 **Coach's Tip:** Data is thin. Log at least 5 more days to unlock higher scoring precision."
+        elif adherence_pct < 75:
+            tip_text = "💡 **Coach's Tip:** You're drifting from the calorie lid. Focus on pre-logging meals to stay under target."
+        elif drivers['avg_density'] < 10.0:
+            tip_text = "💡 **Coach's Tip:** Protein density is low. Swapping one carb heavy side for lean protein will jumpstart your score."
+        elif drivers['weight_shift'] < 0.2:
+            tip_text = "💡 **Coach's Tip:** The scale is steady. If you want faster fat loss, try lowering your Calorie Lid by 100."
+        st.markdown(f'<div class="coach-tip">{tip_text}</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+    else:
+        st.info(f"📊 Effectiveness Calibrating: {msg or 'Gathering more bio-data...'}")
+
     # Weekly History Table
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>', "Trailing 7 Days")
     if not df_7days.empty:
@@ -1864,104 +1942,6 @@ elif st.session_state.view_selection == "📊 Analyze":
             st.line_chart(wow_plot_df, use_container_width=True)
     else:
         st.info("Insufficient data for Week-over-Week trends. Start logging to build your history!")
-    
-    # --- Plan Effectiveness ---
-    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-gauge"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>', "Plan Effectiveness")
-    score, msg, drivers = calculate_plan_effectiveness()
-    if score is not None:
-        color = "#00A6FF"
-        if score < 5: color = "#dc3545"
-        elif score < 8: color = "#ffc107"
-        rotation = (score / 10.0) * 180 - 90
-        gauge_html = f"""
-        <div style="text-align: center; margin: 30px 0;">
-            <div style="font-size: 0.9rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">Plan Effectiveness Score</div>
-            <div style="position: relative; width: 250px; height: 125px; margin: 0 auto; overflow: hidden;">
-                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid #333; border-bottom-color: transparent; border-left-color: transparent; transform: rotate(135deg);"></div>
-                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid {color}; border-bottom-color: transparent; border-left-color: transparent; transform: rotate({rotation+45}deg); transition: transform 1s ease-out; box-shadow: 0 0 15px {color} inset;"></div>
-                <div style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: 3rem; font-weight: 800; color: white;">{score:.1f}</div>
-            </div>
-            <div style="font-size: 0.8rem; color: #aaa; margin-top: 5px;">Based on 14-day adherence &amp; record low weight</div>
-        </div>
-        """
-        st.markdown(gauge_html, unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("How is this calculated?", use_container_width=True, type="tertiary", key="eff_modal_stats"):
-                show_effectiveness_modal()
-
-        st.markdown("""
-        <style>
-        .driver-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
-        .driver-card { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 15px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
-        .driver-icon { width: 24px; height: 24px; margin: 0 auto 8px; display: block; color: #fca311; stroke: #fca311; }
-        .driver-label { font-size: 0.75rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
-        .driver-value { font-size: 1.1rem; font-weight: 700; color: white; margin-top: 2px; }
-        .driver-status { font-size: 0.7rem; margin-top: 5px; font-weight: 600; }
-        .status-ok { color: #00FFC2; } .status-warn { color: #FFC107; } .status-crit { color: #FF4B4B; }
-        .coach-tip { background: linear-gradient(90deg, rgba(0,166,255,0.1), rgba(0,255,194,0.1)); border-left: 4px solid #00A6FF; padding: 15px; border-radius: 8px; margin-top: 10px; }
-        </style>
-        """, unsafe_allow_html=True)
-
-        adherence_pct = (drivers['adherent_days'] / drivers['total_days']) * 100
-        adherence_status = "status-ok" if adherence_pct >= 85 else ("status-warn" if adherence_pct >= 70 else "status-crit")
-        adherence_msg = "Optimal" if adherence_pct >= 85 else ("Inconsistent" if adherence_pct >= 70 else "Needs Focus")
-        density_status = "status-ok" if drivers['avg_density'] >= 10.5 else ("status-warn" if drivers['avg_density'] >= 9.5 else "status-crit")
-        density_msg = "Lean" if drivers['avg_density'] >= 10.5 else ("Moderate" if drivers['avg_density'] >= 9.5 else "Improve")
-        weight_status = "status-ok" if drivers['weight_shift'] >= 0.8 else ("status-warn" if drivers['weight_shift'] >= 0 else "status-crit")
-        weight_msg = "Losing" if drivers['weight_shift'] >= 0.8 else ("Steady" if drivers['weight_shift'] >= 0 else "Gaining")
-        logging_pct = (drivers['total_days'] / 14) * 100
-        logging_status = "status-ok" if logging_pct >= 80 else ("status-warn" if logging_pct >= 60 else "status-crit")
-        logging_msg = "Reliable" if logging_pct >= 80 else ("Partial" if logging_pct >= 60 else "Incomplete")
-
-        icon_check = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
-        icon_zap    = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
-        icon_trend  = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>'
-        icon_clip   = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>'
-
-        drivers_html = f"""
-        <div class="driver-grid">
-            <div class="driver-card">
-                {icon_check}
-                <div class="driver-label">Protocol Success</div>
-                <div class="driver-value">{drivers['adherent_days']}/{drivers['total_days']} Days</div>
-                <div class="driver-status {adherence_status}">{adherence_msg}</div>
-            </div>
-            <div class="driver-card">
-                {icon_zap}
-                <div class="driver-label">Avg Protein</div>
-                <div class="driver-value">{drivers['avg_density']:.1f}%</div>
-                <div class="driver-status {density_status}">{density_msg}</div>
-            </div>
-            <div class="driver-card">
-                {icon_trend}
-                <div class="driver-label">Scale Velocity</div>
-                <div class="driver-value">{drivers['weight_shift']:+.1f} lbs</div>
-                <div class="driver-status {weight_status}">{weight_msg}</div>
-            </div>
-            <div class="driver-card">
-                {icon_clip}
-                <div class="driver-label">Logging Rank</div>
-                <div class="driver-value">{int(logging_pct)}%</div>
-                <div class="driver-status {logging_status}">{logging_msg}</div>
-            </div>
-        </div>
-        """
-        st.markdown(drivers_html, unsafe_allow_html=True)
-
-        tip_text = "Your plan is perfectly calibrated! Maintain this consistency to reach your goal."
-        if logging_pct < 70:
-            tip_text = "💡 **Coach's Tip:** Data is thin. Log at least 5 more days to unlock higher scoring precision."
-        elif adherence_pct < 75:
-            tip_text = "💡 **Coach's Tip:** You're drifting from the calorie lid. Focus on pre-logging meals to stay under target."
-        elif drivers['avg_density'] < 10.0:
-            tip_text = "💡 **Coach's Tip:** Protein density is low. Swapping one carb heavy side for lean protein will jumpstart your score."
-        elif drivers['weight_shift'] < 0.2:
-            tip_text = "💡 **Coach's Tip:** The scale is steady. If you want faster fat loss, try lowering your Calorie Lid by 100."
-        st.markdown(f'<div class="coach-tip">{tip_text}</div>', unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-    else:
-        st.info(f"📊 Effectiveness Calibrating: {msg or 'Gathering more bio-data...'}")
 
     # --- Timeline History Section ---
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-history"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>', "Previous 10 Days")
