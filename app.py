@@ -356,6 +356,37 @@ def get_google_sheet():
     gc = gspread.service_account_from_dict(credentials_dict)
     return gc.open("Nutrition_Logs")
 
+def render_page_header(icon_svg, title):
+    """Renders a prominent page-level title, visually distinct from section headers."""
+    # Replace the section icon class with a larger page-icon class
+    icon = icon_svg.replace('class="lucide', 'class="page-icon lucide')
+    st.markdown(f"""
+    <style>
+    .page-icon {{
+        width: 28px; height: 28px;
+        stroke: #fca311;
+        vertical-align: middle;
+        margin-right: 10px;
+        flex-shrink: 0;
+    }}
+    .page-header-bar {{
+        display: flex;
+        align-items: center;
+        margin: 28px 0 6px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid rgba(252, 163, 17, 0.25);
+    }}
+    .page-header-text {{
+        font-size: 1.45rem;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        color: #ffffff;
+        margin: 0;
+    }}
+    </style>
+    <div class="page-header-bar">{icon}<span class="page-header-text">{title}</span></div>
+    """, unsafe_allow_html=True)
+
 def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, title=None):
     """
     Renders a bimodal, clustered timeline with reduced emoji sizes.
@@ -1776,7 +1807,7 @@ if st.session_state.view_selection == "🍽️ Log":
 
 elif st.session_state.view_selection == "📊 Analyze":
     # --- Analytics View ---
-    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>', "Performance Analytics")
+    render_page_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>', "Performance Analytics")
     df_7days = get_trailing_7_days_data()
 
     # --- Plan Effectiveness ---
@@ -1967,7 +1998,7 @@ elif st.session_state.view_selection == "📊 Analyze":
                 st.markdown(html, unsafe_allow_html=True)
 
 elif st.session_state.view_selection == "⚙️ Plan":
-    render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>', "Configuration")
+    render_page_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>', "Configuration")
 
     # 2. Goal Editor
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-target"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>', "Daily Targets")
