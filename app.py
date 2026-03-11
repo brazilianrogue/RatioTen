@@ -17,7 +17,22 @@ SECONDARY_MODEL = "gemini-2.5-flash"
 STABLE_MODEL = "gemini-2.0-flash"
 
 # --- 1. Page Configuration & Custom CSS ---
-st.set_page_config(page_title="RatioTen", page_icon="🔟", layout="centered")
+from PIL import Image
+import os
+
+favicon_img = "🔟"
+if os.path.exists("favicon.png"):
+    try:
+        favicon_img = Image.open("favicon.png")
+    except:
+        pass
+elif os.path.exists("modern_ratioten_logo.png"):
+    try:
+        favicon_img = Image.open("modern_ratioten_logo.png")
+    except:
+        pass
+
+st.set_page_config(page_title="RatioTen", page_icon=favicon_img, layout="centered")
 
 # --- Initialize Session State ---
 if "messages" not in st.session_state:
@@ -1226,19 +1241,12 @@ if "view_selection" not in st.session_state:
     st.session_state.view_selection = "🍽️ Log"
 current_view = st.session_state.view_selection
 
-def get_image_base64(path):
-    try:
-        with open(path, "rb") as image_file:
-            return f"data:image/png;base64,{base64.b64encode(image_file.read()).decode()}"
-    except:
-        return ""
-logo_b64 = get_image_base64("modern_ratioten_logo.png")
-
 nav_html = f"""
 <!DOCTYPE html>
 <html>
 <head>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;800&display=swap');
   body {{
     margin: 0;
     padding: 0;
@@ -1249,25 +1257,38 @@ nav_html = f"""
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background-color: #161821; /* Dark Tixx like */
-    border-radius: 12px;
+    background: rgba(22, 24, 33, 0.85); /* Premium glassmorphism */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.05); /* Subtle rim light */
+    border-radius: 16px;
     padding: 0 20px;
     height: 70px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   }}
   .nav-left {{
     display: flex;
     align-items: center;
   }}
-  .nav-left img {{
+  .nav-left svg {{
+    width: 32px;
     height: 32px;
     margin-right: 12px;
+    filter: drop-shadow(0 4px 6px rgba(252, 163, 17, 0.25)); /* Glow effect */
   }}
-  .nav-left span {{
+  .nav-left span.brand-text {{
+    font-family: 'Outfit', sans-serif;
     color: white;
-    font-weight: bold;
-    font-size: 18px;
-    letter-spacing: 0.5px;
+    font-size: 21px;
+    letter-spacing: -0.2px;
+    margin-top: 1px;
+  }}
+  .nav-left span .brand-accent {{
+    color: #fca311;
+    font-weight: 800;
+  }}
+  .nav-left span .brand-base {{
+    font-weight: 500;
   }}
   .nav-items {{
     display: flex;
@@ -1344,8 +1365,20 @@ nav_html = f"""
 <body>
   <div class="nav-bar">
     <div class="nav-left">
-      <img src="{logo_b64}" onerror="this.style.display='none'">
-      <span>RatioTen</span>
+      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="34" height="34" rx="10" fill="url(#logo_grad_rt)" />
+        <rect x="0.5" y="0.5" width="33" height="33" rx="9.5" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+        <path d="M11 10.5V23.5" stroke="#161821" stroke-width="2.8" stroke-linecap="round"/>
+        <path d="M25 9.5L13 24.5" stroke="#161821" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="23" cy="17" r="4.5" stroke="#161821" stroke-width="2.5"/>
+        <defs>
+          <linearGradient id="logo_grad_rt" x1="0" y1="0" x2="34" y2="34" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#fca311"/>
+            <stop offset="1" stop-color="#ff7e00"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span class="brand-text"><span class="brand-base">Ratio</span><span class="brand-accent">Ten</span></span>
     </div>
     <div class="nav-items">
       <div class="nav-item {'active' if current_view == '🍽️ Log' else ''}" onclick="switchTab('H_LOG')">
