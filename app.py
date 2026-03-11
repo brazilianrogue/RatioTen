@@ -1312,6 +1312,60 @@ components.html(nav_html, height=72)
 def set_view(view):
     st.session_state.view_selection = view
 
+@st.dialog("Plan Effectiveness Score Breakdown", width="large")
+def show_effectiveness_modal():
+    st.markdown("""
+    **How is the Plan Effectiveness Score Calculated?**
+
+    The Plan Effectiveness Score is a powerful tool designed to measure how well you are adhering to your nutritional goals and how your body is responding over a 14-day period. Whether your goal is to lose body fat or build lean muscle, consistent feedback is the key to maximizing your progress. This score provides an objective, data-driven look at your consistency so you can calibrate your approach and avoid guessing.
+
+    #### The Two Core Components
+
+    Your score, which ranges from a minimum of 1.0 to a maximum of 10.0, is built on two primary factors: **Adherence** and **Weight Shift**.
+
+    **1. Daily Adherence (Up to 5.0 Points)**
+    The first half of your score measures your day-to-day consistency over the last 14 days. To hit your goals, you need to eat enough protein to protect or build muscle while managing your overall calories.
+
+    We track this by looking at your "Protein Density."
+    
+    $$ \\text{Protein Density} = \\left( \\frac{\\text{Protein (g)}}{\\text{Total Calories}} \\right) \\times 100 $$
+
+    A day is considered "Adherent" if it meets two conditions:
+    *   Your Protein Density is at least **10.0%**.
+    *   Your Total Calories are under your daily target limit (with a small 100-calorie buffer).
+
+    Your Adherence Score is then calculated based on the percentage of days you hit the target:
+    
+    $$ \\text{Adherence Score} = \\left( \\frac{\\text{Adherent Days}}{\\text{Total Days Logged}} \\right) \\times 5.0 $$
+
+    If you log 14 days and hit your macro targets every single day, you earn a perfect 5.0 for this section. If you hit it half the time, you earn 2.5. This rewards consistency. In both weight loss and bulking, hitting your daily targets is the foundational engine of change.
+
+    **2. The Weight Shift Focus (Up to 5.0 Points)**
+    Even with perfect adherence, your body's response is the ultimate truth. The second half of your score looks at actual weight movement over the 14-day window.
+
+    To smooth out daily fluctuations, the system compares your lowest weight from the first 7 days to your lowest weight from the past 7 days:
+    
+    $$ \\text{Weight Shift} = \\text{Min. Weight (Week 1)} - \\text{Min. Weight (Week 2)} $$
+
+    *   **Weight Loss (+5.0 Points):** If your minimum weight dropped by 1.0 lb or more, you earn the full 5 points. For weight loss journeys, this proves the calorie deficit is working. For lean bulking journeys, maintaining a very slight deficit or maintenance phase is often required before adjusting calories upward.
+    *   **Maintenance (+2.0 to +4.9 Points):** If your weight stayed the same or dropped slightly (between 0 and 0.9 lbs), you earn a partial score between 2.0 and 4.9.
+    *   **Weight Gain (-2.0 Points):** If your minimum weight increased by more than 0.5 lbs, the system subtracts 2.0 points. While this might seem counterintuitive for a bulking journey, rapid weight gain without precise tracking often includes unwanted fat. The system flags this so you can review if the surplus is appropriate.
+
+    #### Scenarios and Scores
+
+    **Scenario A: The 10/10 Perfect Run**
+    You hit your protein and calorie targets 14 out of 14 days (5 points). Your lowest weight in the second week was 1.5 lbs lighter than the first week (5 points). **Total Score: 10.0.** Your plan is perfectly calibrated—keep going!
+
+    **Scenario B: The 8.5/10 (High Adherence, Slow Movement)**
+    You hit your targets every single day (5.0 points) but your weight only dropped by 0.5 lbs (+3.5 points). **Total Score: 8.5.** You are extremely consistent, but the scale isn't moving fast. This is a signal that you might need to slightly lower your "Calorie Lid" to accelerate fat loss, or keep it exactly where it is if you prefer a slow, muscle-protective recomp.
+
+    **Scenario C: The Variable Run (Low Adherence, Weight Gain)**
+    You hit your targets 5 out of 14 days (1.8 points) and your weight increased by 1 lb (-2.0 points). **Total Score: 1.0** (The minimum score). This means the system is detecting a drift from the protocol. This isn't a failure; it's vital feedback. It tells you exactly where to focus—getting back to hitting your daily targets.
+
+    #### Why Feedback Matters
+    We don't manage what we don't measure. By combining your daily input (Adherence) with your biological output (Weight Shift), the Plan Effectiveness Score acts as your compass. It removes the emotion from standing on the scale and replaces it with clear math, empowering you to adjust your approach and reach your goals.
+    """)
+
 # No more duplicate CSS block here
 
 
@@ -1831,6 +1885,13 @@ elif st.session_state.view_selection == "⚙️ Plan":
         </div>
         """
         st.markdown(gauge_html, unsafe_allow_html=True)
+        
+        # Centered button container
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("How is this calculated?", use_container_width=True, type="tertiary"):
+                show_effectiveness_modal()
+                
     else:
         st.info(f"📊 Effectiveness Calibrating: {msg}")
 
