@@ -1933,7 +1933,7 @@ elif st.session_state.view_selection == "📊 Analyze":
     # Weekly History Table
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>', "Trailing 7 Days")
     if not df_7days.empty:
-        st.dataframe(df_7days, width="stretch", hide_index=True)
+        st.dataframe(df_7days[["Date", "Calories", "Protein", "Density"]], width="stretch", hide_index=True)
     else:
         st.info("No logs found for the trailing 7 days.")
 
