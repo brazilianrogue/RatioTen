@@ -350,6 +350,12 @@ def get_client():
 
 client = get_client()
 
+@st.cache_resource
+def get_google_sheet():
+    credentials_dict = dict(st.secrets["gcp_service_account"])
+    gc = gspread.service_account_from_dict(credentials_dict)
+    return gc.open("Nutrition_Logs")
+
 def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, title=None):
     """
     Renders a bimodal, clustered timeline with reduced emoji sizes.
@@ -922,37 +928,38 @@ def get_user_goals():
 
 @st.cache_data(ttl=3600)
 def calculate_plan_effectiveness():
+    """Calculates a score (1-10) based on 14-day adherence and weight shift."""
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
-        gc = gspread.service_account_from_dict(credentials_dict)
-        sh = gc.open("Nutrition_Logs")
-        
-        # 1. Get User Goals
+        if st.session_state.get("demo_mode", False):
+            # Mock data for demonstration
+            drivers = {
+                "adherent_days": 11,
+                "total_days": 13,
+                "avg_density": 10.8,
+                "weight_shift": 1.4
+            }
+            return 8.7, None, drivers
+            
+        sh = get_google_sheet()
         goals = get_user_goals()
-        target_density = 10.0
+        target_density = 10.0 # Default threshold
         
-        # 2. Get last 14 days of food logs for adherence
+        # 1. Get last 14 days of food logs
         try:
-            food_ws = sh.sheet1
-            food_values = food_ws.get_all_values()
-            expected_cols = ["Date", "Item", "Calories", "Protein", "Density"]
-            df_food = pd.DataFrame(food_values)
-            if df_food.iloc[0, 0] in ["Date", "date", "Time", "timestamp", "today"]:
-                df_food.columns = df_food.iloc[0]
-                df_food = df_food[1:]
-            else:
-                df_food.columns = expected_cols
-                
-            df_food['Date'] = pd.to_datetime(df_food['Date'], errors='coerce').dt.date
-            df_food['Calories'] = pd.to_numeric(df_food['Calories'], errors='coerce').fillna(0)
-            df_food['Protein'] = pd.to_numeric(df_food['Protein'], errors='coerce').fillna(0)
+            food_ws = sh.worksheet("Food_Logs")
+            food_records = food_ws.get_all_records()
+            if not food_records:
+                return None, "No food log data found.", None
+            
+            df_food = pd.DataFrame(food_records)
+            df_food['Date'] = pd.to_datetime(df_food['Date']).dt.date
             
             fourteen_days_ago = (datetime.now(EASTERN) - timedelta(days=14)).date()
             seven_days_ago = (datetime.now(EASTERN) - timedelta(days=7)).date()
             
             df_food = df_food[df_food['Date'] >= fourteen_days_ago]
             if df_food.empty:
-                return None, "Insufficient food log data (need logs from last 14 days)."
+                return None, "Insufficient food log data (need logs from last 14 days).", None
                 
             daily_summary = df_food.groupby('Date')[['Calories', 'Protein']].sum().reset_index()
             daily_summary['Density'] = (daily_summary['Protein'] / daily_summary['Calories']) * 100
@@ -966,19 +973,20 @@ def calculate_plan_effectiveness():
             
             total_days_logged = int(len(daily_summary))
             if total_days_logged < 7:
-                return None, "Insufficient food log data (need at least 7 days of logs)."
+                return None, "Insufficient food log data (need at least 7 days of logs).", None
                 
             adherence_rate = float(adherent_days) / float(total_days_logged)
+            avg_density = daily_summary['Density'].mean()
             
         except Exception as e:
-            return None, "Error parsing food logs."
+            return None, "Error parsing food logs.", None
 
         # 3. Get last 14 days of weight logs
         try:
             weight_ws = sh.worksheet("Weight_Logs")
             weight_records = weight_ws.get_all_records()
             if not weight_records:
-                return None, "No weight data found in 'Weight_Logs' sheet."
+                return None, "No weight data found in 'Weight_Logs' sheet.", None
                 
             df_weight = pd.DataFrame(weight_records)
             
@@ -989,48 +997,56 @@ def calculate_plan_effectiveness():
             
             if not date_col or not weight_col:
                 found_cols = ", ".join(df_weight.columns)
-                return None, f"Weight_Logs missing required columns. Need 'Date' and 'Weight (lbs)'. Found: {found_cols}"
+                return None, f"Weight_Logs missing required columns. Found: {found_cols}", None
 
             df_weight['Date'] = pd.to_datetime(df_weight[date_col], errors='coerce').dt.date
             df_weight['Weight'] = pd.to_numeric(df_weight[weight_col], errors='coerce')
             
             df_recent = df_weight[df_weight['Date'] >= fourteen_days_ago].dropna(subset=['Weight'])
             if len(df_recent) < 4:
-                return None, f"Insufficient weight data (need 4+ weigh-ins in last 14 days, found {len(df_recent)})."
+                return None, f"Insufficient weight data (need 4 weigh-ins, found {len(df_recent)}).", None
                 
             # Delta between first 7 days min and last 7 days min
             first_half = df_recent[df_recent['Date'] < seven_days_ago]
             second_half = df_recent[df_recent['Date'] >= seven_days_ago]
             
             if first_half.empty or second_half.empty:
-               return None, "Insufficient weight distribution (need weigh-ins in both weeks of the 14-day window)."
+               return None, "Insufficient weight distribution (need weigh-ins in both weeks).", None
                
             w1_min = first_half['Weight'].min()
             w2_min = second_half['Weight'].min()
             weight_delta = w1_min - w2_min # Positive means weight loss
             
         except Exception as e:
-            return None, f"Error parsing weight logs: {str(e)}"
+            return None, f"Error parsing weight logs: {str(e)}", None
 
         # 4. Calculate Score 
         # Base score on adherence (0 to 5 pts)
         score = adherence_rate * 5.0
         
         # Add points for weight loss (up to 5 pts)
-        # If weight loss is >= 1.0 lbs, give full 5 pts. If 0 lbs, give 2 points (maintenance). If gained, 0 pts.
         if weight_delta >= 1.0:
             score += 5.0
         elif weight_delta >= 0:
-            score += 2.0 + (weight_delta * 3.0) # Scale between 0 and 1
+            # Scale 0 to 1.0 lbs loss to 2.0 to 4.9 pts
+            score += 2.0 + (weight_delta * 2.9)
         elif weight_delta < -0.5:
-             # subtract points for significant gain
-             score -= 2.0
-             
+            # Penalize gain
+            score -= 2.0
+            
         score = max(1.0, min(10.0, score))
-        return score, None
+        
+        drivers = {
+            "adherent_days": adherent_days,
+            "total_days": total_days_logged,
+            "avg_density": avg_density,
+            "weight_shift": weight_delta
+        }
+        
+        return score, None, drivers
         
     except Exception as e:
-        return None, f"Calculation error: {e}"
+        return None, f"System Error: {str(e)}", None
 
 # --- 3. System Prompt (The Rules Engine) ---
 def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None, weekly_summary=None, today_logs=None):
@@ -1864,7 +1880,7 @@ elif st.session_state.view_selection == "⚙️ Plan":
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>', "Protocol Plan")
     
     # 1. Effectiveness Score
-    score, msg = calculate_plan_effectiveness()
+    score, msg, drivers = calculate_plan_effectiveness()
     if score is not None:
         # Render a custom Speedometer gauge
         color = "#00A6FF" # Cyan by default
@@ -1891,9 +1907,104 @@ elif st.session_state.view_selection == "⚙️ Plan":
         with col2:
             if st.button("How is this calculated?", use_container_width=True, type="tertiary"):
                 show_effectiveness_modal()
-                
+        
+        # --- Score Drivers Grid ---
+        st.markdown("""
+        <style>
+        .driver-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .driver-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .driver-emoji { font-size: 1.5rem; margin-bottom: 5px; }
+        .driver-label { font-size: 0.75rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+        .driver-value { font-size: 1.1rem; font-weight: 700; color: white; margin-top: 2px; }
+        .driver-status { font-size: 0.7rem; margin-top: 5px; font-weight: 600; }
+        
+        .status-ok { color: #00FFC2; }
+        .status-warn { color: #FFC107; }
+        .status-crit { color: #FF4B4B; }
+        
+        .coach-tip {
+            background: linear-gradient(90deg, rgba(0, 166, 255, 0.1), rgba(0, 255, 194, 0.1));
+            border-left: 4px solid #00A6FF;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # Process Driver Statuses
+        adherence_pct = (drivers['adherent_days'] / drivers['total_days']) * 100
+        adherence_status = "status-ok" if adherence_pct >= 85 else ("status-warn" if adherence_pct >= 70 else "status-crit")
+        adherence_msg = "Optimal" if adherence_pct >= 85 else ("Inconsistent" if adherence_pct >= 70 else "Needs Focus")
+        
+        density_status = "status-ok" if drivers['avg_density'] >= 10.5 else ("status-warn" if drivers['avg_density'] >= 9.5 else "status-crit")
+        density_msg = "Lean" if drivers['avg_density'] >= 10.5 else ("Moderate" if drivers['avg_density'] >= 9.5 else "Improve")
+        
+        weight_status = "status-ok" if drivers['weight_shift'] >= 0.8 else ("status-warn" if drivers['weight_shift'] >= 0 else "status-crit")
+        weight_msg = "Losing" if drivers['weight_shift'] >= 0.8 else ("Steady" if drivers['weight_shift'] >= 0 else "Gaining")
+        
+        logging_pct = (drivers['total_days'] / 14) * 100
+        logging_status = "status-ok" if logging_pct >= 80 else ("status-warn" if logging_pct >= 60 else "status-crit")
+        logging_msg = "Reliable" if logging_pct >= 80 else ("Partial" if logging_pct >= 60 else "Incomplete")
+
+        drivers_html = f"""
+        <div class="driver-grid">
+            <div class="driver-card">
+                <div class="driver-emoji">🎯</div>
+                <div class="driver-label">Protocol Success</div>
+                <div class="driver-value">{drivers['adherent_days']}/{drivers['total_days']} Days</div>
+                <div class="driver-status {adherence_status}">{adherence_msg}</div>
+            </div>
+            <div class="driver-card">
+                <div class="driver-emoji">🍳</div>
+                <div class="driver-label">Avg Protein</div>
+                <div class="driver-value">{drivers['avg_density']:.1f}%</div>
+                <div class="driver-status {density_status}">{density_msg}</div>
+            </div>
+            <div class="driver-card">
+                <div class="driver-emoji">📉</div>
+                <div class="driver-label">Scale Velocity</div>
+                <div class="driver-value">{drivers['weight_shift']:+.1f} lbs</div>
+                <div class="driver-status {weight_status}">{weight_msg}</div>
+            </div>
+            <div class="driver-card">
+                <div class="driver-emoji">📝</div>
+                <div class="driver-label">Logging Rank</div>
+                <div class="driver-value">{int(logging_pct)}%</div>
+                <div class="driver-status {logging_status}">{logging_msg}</div>
+            </div>
+        </div>
+        """
+        st.markdown(drivers_html, unsafe_allow_html=True)
+        
+        # --- Coach's Tip Logic ---
+        tip_text = "Your plan is perfectly calibrated! Maintain this consistency to reach your goal."
+        if logging_pct < 70:
+            tip_text = "💡 **Coach's Tip:** Data is thin. Log at least 5 more days to unlock higher scoring precision."
+        elif adherence_pct < 75:
+            tip_text = "💡 **Coach's Tip:** You're drifting from the calorie lid. Focus on pre-logging meals to stay under target."
+        elif drivers['avg_density'] < 10.0:
+            tip_text = "💡 **Coach's Tip:** Protein density is low. Swapping one carb heavy side for lean protein will jumpstart your score."
+        elif drivers['weight_shift'] < 0.2:
+            tip_text = "💡 **Coach's Tip:** The scale is steady. If you want faster fat loss, try lowering your Calorie Lid by 100."
+            
+        st.markdown(f'<div class="coach-tip">{tip_text}</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
     else:
-        st.info(f"📊 Effectiveness Calibrating: {msg}")
+        st.info(f"📊 Effectiveness Calibrating: {msg or 'Gathering more bio-data...'}")
+        
 
     # 2. Goal Editor
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-target"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>', "Daily Targets")
