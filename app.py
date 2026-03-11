@@ -978,29 +978,39 @@ def calculate_plan_effectiveness():
             weight_ws = sh.worksheet("Weight_Logs")
             weight_records = weight_ws.get_all_records()
             if not weight_records:
-                return None, "No weight data found."
+                return None, "No weight data found in 'Weight_Logs' sheet."
                 
             df_weight = pd.DataFrame(weight_records)
-            df_weight['Date'] = pd.to_datetime(df_weight['Date'], errors='coerce').dt.date
-            df_weight['Weight'] = pd.to_numeric(df_weight['Weight (lbs)'], errors='coerce')
             
-            df_recent = df_weight[df_weight['Date'] >= fourteen_days_ago]
+            # Robust Column Mapping
+            col_map = {col.lower().strip(): col for col in df_weight.columns}
+            date_col = next((col_map[c] for c in ['date', 'timestamp', 'time', 'day'] if c in col_map), None)
+            weight_col = next((col_map[c] for c in ['weight (lbs)', 'weight', 'lbs', 'mass'] if c in col_map), None)
+            
+            if not date_col or not weight_col:
+                found_cols = ", ".join(df_weight.columns)
+                return None, f"Weight_Logs missing required columns. Need 'Date' and 'Weight (lbs)'. Found: {found_cols}"
+
+            df_weight['Date'] = pd.to_datetime(df_weight[date_col], errors='coerce').dt.date
+            df_weight['Weight'] = pd.to_numeric(df_weight[weight_col], errors='coerce')
+            
+            df_recent = df_weight[df_weight['Date'] >= fourteen_days_ago].dropna(subset=['Weight'])
             if len(df_recent) < 4:
-                return None, "Insufficient weight data (need at least 4 weigh-ins in last 14 days)."
+                return None, f"Insufficient weight data (need 4+ weigh-ins in last 14 days, found {len(df_recent)})."
                 
             # Delta between first 7 days min and last 7 days min
             first_half = df_recent[df_recent['Date'] < seven_days_ago]
             second_half = df_recent[df_recent['Date'] >= seven_days_ago]
             
             if first_half.empty or second_half.empty:
-               return None, "Insufficient weight distribution (need weigh-ins in both weeks)."
+               return None, "Insufficient weight distribution (need weigh-ins in both weeks of the 14-day window)."
                
             w1_min = first_half['Weight'].min()
             w2_min = second_half['Weight'].min()
             weight_delta = w1_min - w2_min # Positive means weight loss
             
         except Exception as e:
-            return None, "Error parsing weight logs."
+            return None, f"Error parsing weight logs: {str(e)}"
 
         # 4. Calculate Score 
         # Base score on adherence (0 to 5 pts)
