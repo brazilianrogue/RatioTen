@@ -1048,18 +1048,16 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
                     daily_data[eval_date] = {"cals": 0.0, "prot": 0.0, "logs": [], "is_missing": True}
             
             total_days_eval = 14
-            # We still need at least 7 days of actual logging or skip days to return a score
-            days_with_data = sum(1 for d in daily_data.values() if not d.get("is_missing", False))
-            if days_with_data < 7:
-                return None, f"Need 7+ days of data. Currently have {days_with_data}.", None
-
+            
+            # --- Build the drivers early to allow partial logging ---
             adherence_score_total = 0.0
             sum_cals = 0.0
             sum_prot = 0.0
-            
             daily_breakdown = {}
-            for log_date, nums in daily_data.items():
-                day_name = log_date.strftime("%A")
+            
+            # Always iterate 14 days
+            for eval_date, nums in daily_data.items():
+                day_name = eval_date.strftime("%A")
                 sched = fasting_schedule.get(day_name, {"start": None, "end": None})
                 
                 # Determine scheduled eating hours
@@ -1114,8 +1112,8 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
                         try:
                             s_time = datetime.strptime(sched["start"], "%H:%M").time()
                             e_time = datetime.strptime(sched["end"], "%H:%M").time()
-                            buf_start = datetime.combine(log_date, s_time) - timedelta(hours=1)
-                            buf_end = datetime.combine(log_date, e_time) + timedelta(hours=1)
+                            buf_start = datetime.combine(eval_date, s_time) - timedelta(hours=1)
+                            buf_end = datetime.combine(eval_date, e_time) + timedelta(hours=1)
                             if buf_end < buf_start: buf_end += timedelta(days=1)
                             
                             all_in_window = True
@@ -1132,14 +1130,28 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
                 
                 day_score = cal_pts_awarded + prot_pts_awarded + timing_pts
                 adherence_score_total += (day_score / 10.0)
-                daily_breakdown[log_date] = {
+                daily_breakdown[eval_date] = {
                     "cal_pts": cal_pts_awarded,
                     "prot_pts": prot_pts_awarded,
-                    "time_pts": timing_pts
+                    "time_pts": timing_pts,
+                    "day_score": day_score
                 }
 
-            adherence_rate = adherence_score_total / total_days_eval
             avg_density = (sum_prot / sum_cals * 100) if sum_cals > 0 else 0.0
+            adherence_rate = adherence_score_total / total_days_eval
+            
+            drivers = {
+                "adherent_days": round(adherence_score_total, 1),
+                "total_days": total_days_eval,
+                "avg_density": avg_density,
+                "adherence_rate": adherence_rate,
+                "daily_breakdown": daily_breakdown
+            }
+
+            # Now enforce the "minimum data for aggregate score" rule
+            days_with_data = sum(1 for d in daily_data.values() if not d.get("is_missing", False))
+            if days_with_data < 7:
+                return None, f"Need 7+ days of data. Have {days_with_data}.", drivers
 
         except Exception as e:
             return None, f"Error parsing food logs: {str(e)}", None
@@ -1192,14 +1204,7 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
 
         score = max(1.0, min(10.0, score))
 
-        return score, None, {
-            "adherent_days": round(adherence_score_total, 1),
-            "total_days": total_days_eval,
-            "avg_density": avg_density,
-            "weight_shift": weight_delta,
-            "adherence_rate": adherence_rate,
-            "daily_breakdown": daily_breakdown
-        }
+        return score, None, drivers
 
     except Exception as e:
         return None, f"System Error: {str(e)}", None
@@ -1225,13 +1230,16 @@ def sync_plan_effectiveness_logs(force_resync=False):
             log_ws.append_row(["Date", "Calorie Pts", "Protein Pts", "Fast Timing Pts", "Ad Score", "Weight Shift", "Plan Score"])
             
         data = log_ws.get_all_values()
-        logged_dates = set([row[0] for row in data[1:]]) if len(data) > 1 else set()
+        # Create a mapping of Date -> Row Index (1-indexed)
+        date_row_map = {row[0]: i + 1 for i, row in enumerate(data)}
+        logged_dates = set(date_row_map.keys())
         
         now = datetime.now(EASTERN).date()
+        backfill_range = 21 if force_resync else 14
         
-        # Test the last 14 completed days (yesterday backwards)
+        # Test the backfill days
         days_logged_this_run = 0
-        for i in range(14, 0, -1):
+        for i in range(backfill_range, 0, -1):
             target_date = now - timedelta(days=i)
             date_str = target_date.strftime("%Y-%m-%d")
             
@@ -1243,29 +1251,36 @@ def sync_plan_effectiveness_logs(force_resync=False):
                     pre_goals=all_goals, 
                     pre_fasting=all_fasting
                 )
-                if score is not None and drivers:
+                
+                if drivers:
                     daily_breakdown = drivers.get("daily_breakdown", {})
                     day_data = daily_breakdown.get(target_date, {})
                     
                     cal_pts = day_data.get("cal_pts", 0.0)
                     prot_pts = day_data.get("prot_pts", 0.0)
                     time_pts = day_data.get("time_pts", 0.0)
+                    day_score = day_data.get("day_score", 0.0)
                     
-                    # The "Ad Score" column in the log will now show the DAILY performance (0-5)
-                    # to match user expectation, while the Plan Score shows the rolling result.
-                    day_score = cal_pts + prot_pts + time_pts
+                    # Log DAILY perf (0-5) in Ad Score
                     day_ad_score = day_score / 2.0
-
-                    
                     weight_shift = drivers.get("weight_shift", 0.0)
+                    final_score = score if score is not None else 0.0
                     
-                    log_ws.append_row([
+                    row_content = [
                         date_str, cal_pts, prot_pts, time_pts,
-                        round(day_ad_score, 2), round(weight_shift, 2), round(score, 2)
-                    ])
-                    time.sleep(1.0) # Respect rate limits
+                        round(day_ad_score, 2), round(weight_shift, 2), round(final_score, 2)
+                    ]
+                    
+                    if date_str in date_row_map:
+                        if force_resync:
+                            log_ws.update(f"A{date_row_map[date_str]}:G{date_row_map[date_str]}", [row_content])
+                    else:
+                        log_ws.append_row(row_content)
+                        # Avoid rate limit on append
+                        time.sleep(1.0)
+                        
                     days_logged_this_run += 1
-                    if days_logged_this_run >= 10: # More aggressive batching now that it's optimized
+                    if days_logged_this_run >= 20: 
                         break
                 else:
                     with open("sync_errors.txt", "a") as f:
@@ -1274,6 +1289,7 @@ def sync_plan_effectiveness_logs(force_resync=False):
         import traceback
         with open("sync_errors.txt", "a") as f:
             f.write(f"[{datetime.now(EASTERN)}] Sync Error: {e}\n{traceback.format_exc()}\n")
+
 
 # Run the sync silently in the background
 if "plan_effectiveness_synced" not in st.session_state:
