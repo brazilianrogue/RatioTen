@@ -1945,13 +1945,13 @@ elif st.session_state.view_selection == "📊 Analyze":
         color = "#00A6FF"
         if score < 5: color = "#dc3545"
         elif score < 8: color = "#ffc107"
-        rotation = (score / 10.0) * 180 - 90
+        rotation = 135 + (score / 10.0) * 180
         gauge_html = f"""
         <div style="text-align: center; margin: 30px 0;">
             <div style="font-size: 0.9rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">Plan Effectiveness Score</div>
             <div style="position: relative; width: 250px; height: 125px; margin: 0 auto; overflow: hidden;">
-                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid #333; border-bottom-color: transparent; border-left-color: transparent; transform: rotate(135deg);"></div>
-                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid {color}; border-bottom-color: transparent; border-left-color: transparent; transform: rotate({rotation+45}deg); transition: transform 1s ease-out; box-shadow: 0 0 15px {color} inset;"></div>
+                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid #333; border-bottom-color: transparent; border-left-color: transparent; transform: rotate(315deg);"></div>
+                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid {color}; border-bottom-color: transparent; border-left-color: transparent; transform: rotate({rotation}deg); transition: transform 1s ease-out; box-shadow: 0 0 15px {color} inset;"></div>
                 <div style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: 3rem; font-weight: 800; color: white;">{score:.1f}</div>
             </div>
             <div style="font-size: 0.8rem; color: #aaa; margin-top: 5px;">Based on 14-day adherence &amp; record low weight</div>
