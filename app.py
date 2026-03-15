@@ -1024,29 +1024,115 @@ def calculate_plan_effectiveness():
                     cals = float(row[cal_idx]) if row[cal_idx] else 0.0
                     prot = float(row[prot_idx]) if row[prot_idx] else 0.0
                     if log_date not in daily_data:
-                        daily_data[log_date] = {"cals": 0.0, "prot": 0.0}
+                        daily_data[log_date] = {"cals": 0.0, "prot": 0.0, "logs": []}
                     daily_data[log_date]["cals"] += cals
                     daily_data[log_date]["prot"] += prot
+                    daily_data[log_date]["logs"].append(dt)
                 except:
                     continue
 
-            if not daily_data:
-                return None, "No food log data in last 14 days.", None
+            # Fill in missing (skip) days up to today
+            if daily_data:
+                min_date = min(daily_data.keys())
+            else:
+                min_date = fourteen_days_ago
+            max_date = datetime.now(EASTERN).date()
+            
+            fasting_schedule = get_fasting_schedule()
+            
+            current_d = min_date
+            while current_d <= max_date:
+                if current_d not in daily_data:
+                    day_name = current_d.strftime("%A")
+                    sched = fasting_schedule.get(day_name, {"start": None, "end": None})
+                    if not sched["start"]:
+                        daily_data[current_d] = {"cals": 0.0, "prot": 0.0, "logs": []}
+                current_d += timedelta(days=1)
 
-            total_days_logged = len(daily_data)
-            if total_days_logged < 7:
-                return None, f"Need 7+ logged days. Currently have {total_days_logged}.", None
+            total_days_eval = len(daily_data)
+            if total_days_eval < 7:
+                return None, f"Need 7+ days evaluated. Currently have {total_days_eval}.", None
 
-            adherent_days = 0
-            density_sum = 0.0
-            for nums in daily_data.values():
-                density = (nums["prot"] / nums["cals"] * 100) if nums["cals"] > 0 else 0.0
-                density_sum += density
-                if density >= target_density and nums["cals"] <= target_cal_limit:
-                    adherent_days += 1
+            adherence_score_total = 0.0
+            sum_cals = 0.0
+            sum_prot = 0.0
+            
+            for log_date, nums in daily_data.items():
+                day_name = log_date.strftime("%A")
+                sched = fasting_schedule.get(day_name, {"start": None, "end": None})
+                
+                # Determine scheduled eating hours
+                if sched["start"] and sched["end"]:
+                    try:
+                        start_t = datetime.strptime(sched["start"], "%H:%M")
+                        end_t = datetime.strptime(sched["end"], "%H:%M")
+                        eating_hours = (end_t - start_t).total_seconds() / 3600.0
+                        if eating_hours < 0: eating_hours += 24.0 # Cross midnight
+                    except:
+                        eating_hours = 8.0
+                else:
+                    eating_hours = 0.0 # Skip day
+                
+                target_protein = float(goals.get('protein', 150))
+                if eating_hours >= 6.0:
+                    dynamic_floor = target_protein
+                elif eating_hours <= 1.0:
+                    if eating_hours == 0.0:
+                        dynamic_floor = 0.0
+                    else:
+                        dynamic_floor = target_protein * 0.30
+                else:
+                    fraction = 0.30 + ((eating_hours - 1.0) / 5.0) * 0.70
+                    dynamic_floor = target_protein * fraction
+                
+                sum_cals += nums["cals"]
+                sum_prot += nums["prot"]
 
-            adherence_rate = adherent_days / total_days_logged
-            avg_density = density_sum / total_days_logged
+                day_score = 0.0
+
+                # 1. Calories (4 pts)
+                if nums["cals"] <= target_cal_limit:
+                    day_score += 4.0
+                elif nums["cals"] <= target_cal_limit + 200:
+                    day_score += 2.0
+                
+                # 2. Protein (4 pts)
+                if nums["prot"] >= dynamic_floor:
+                    day_score += 4.0
+                elif nums["prot"] >= (dynamic_floor * 0.8):
+                    day_score += 2.0
+
+                # 3. Fasting Timing (2 pts)
+                timing_pts = 0.0
+                if eating_hours == 0.0:
+                    if nums["cals"] == 0:
+                        timing_pts = 2.0
+                else:
+                    if len(nums["logs"]) > 0:
+                        try:
+                            s_time = datetime.strptime(sched["start"], "%H:%M").time()
+                            e_time = datetime.strptime(sched["end"], "%H:%M").time()
+                            buf_start = datetime.combine(log_date, s_time) - timedelta(hours=1)
+                            buf_end = datetime.combine(log_date, e_time) + timedelta(hours=1)
+                            if buf_end < buf_start: buf_end += timedelta(days=1)
+                            
+                            all_in_window = True
+                            for log_dt in nums["logs"]:
+                                log_dt_naive = log_dt.replace(tzinfo=None)
+                                if not (buf_start <= log_dt_naive <= buf_end):
+                                    all_in_window = False
+                                    break
+                            
+                            if all_in_window:
+                                timing_pts = 2.0
+                        except:
+                            timing_pts = 2.0 # Benefit of doubt for parsing errors
+                
+                day_score += timing_pts
+                adherence_score_total += (day_score / 10.0)
+
+            adherence_rate = adherence_score_total / total_days_eval
+            avg_density = (sum_prot / sum_cals * 100) if sum_cals > 0 else 0.0
 
         except Exception as e:
             return None, f"Error parsing food logs: {str(e)}", None
@@ -1100,8 +1186,8 @@ def calculate_plan_effectiveness():
         score = max(1.0, min(10.0, score))
 
         return score, None, {
-            "adherent_days": adherent_days,
-            "total_days": total_days_logged,
+            "adherent_days": round(adherence_score_total, 1),
+            "total_days": total_days_eval,
             "avg_density": avg_density,
             "weight_shift": weight_delta
         }
@@ -1425,21 +1511,18 @@ def show_effectiveness_modal():
     Your score, which ranges from a minimum of 1.0 to a maximum of 10.0, is built on two primary factors: **Adherence** and **Weight Shift**.
 
     **1. Daily Adherence (Up to 5.0 Points)**
-    The first half of your score measures your day-to-day consistency over the last 14 days. To hit your goals, you need to eat enough protein to protect or build muscle while managing your overall calories.
+    The first half of your score measures your day-to-day consistency over the last 14 days. To hit your goals, you need to execute your plan effectively.
 
-    We track this by looking at your "Protein Density."
+    We break each day down into a **10-Point System**, which is then averaged across the 14 days:
+    *   **Calories (4 Points):** Full points for staying under your Calorie Lid (target + 100).
+    *   **Protein (4 Points):** Full points for hitting your **Dynamic Protein Floor**. To protect lean mass without forcing impossible single-meal gorging, the required protein dynamically scales based on your scheduled eating window. A 6+ hour window asks for 100% of your goal. An OMAD (1 hour) window scales down to 30%.
+    *   **Fasting Timing (2 Points):** Full points if all logged items fall within your scheduled eating window (with a generous 1-hour buffer). If you have a full Fasting/Skip day scheduled, staying at 0 calories yields full points.
+
+    Your Adherence Score is then calculated based on your average daily performance:
     
-    $$ \\text{Protein Density} = \\left( \\frac{\\text{Protein (g)}}{\\text{Total Calories}} \\right) \\times 100 $$
+    $$ \\text{Adherence Score} = \\left( \\frac{\\text{Average Daily Points}}{10} \\right) \\times 5.0 $$
 
-    A day is considered "Adherent" if it meets two conditions:
-    *   Your Protein Density is at least **10.0%**.
-    *   Your Total Calories are under your daily target limit (with a small 100-calorie buffer).
-
-    Your Adherence Score is then calculated based on the percentage of days you hit the target:
-    
-    $$ \\text{Adherence Score} = \\left( \\frac{\\text{Adherent Days}}{\\text{Total Days Logged}} \\right) \\times 5.0 $$
-
-    If you log 14 days and hit your macro targets every single day, you earn a perfect 5.0 for this section. If you hit it half the time, you earn 2.5. This rewards consistency. In both weight loss and bulking, hitting your daily targets is the foundational engine of change.
+    If you log 14 days and hit your targets and windows perfectly every single day, you earn a perfect 5.0 for this section. If you hit it half the time, you earn 2.5. This rewards consistency.
 
     **2. The Weight Shift Focus (Up to 5.0 Points)**
     Even with perfect adherence, your body's response is the ultimate truth. The second half of your score looks at actual weight movement over the 14-day window.
@@ -1452,16 +1535,19 @@ def show_effectiveness_modal():
     *   **Maintenance (+2.0 to +4.9 Points):** If your weight stayed the same or dropped slightly (between 0 and 0.9 lbs), you earn a partial score between 2.0 and 4.9.
     *   **Weight Gain (-2.0 Points):** If your minimum weight increased by more than 0.5 lbs, the system subtracts 2.0 points. While this might seem counterintuitive for a bulking journey, rapid weight gain without precise tracking often includes unwanted fat. The system flags this so you can review if the surplus is appropriate.
 
+    #### Note on Average Density (Score Driver)
+    The "Avg Protein" metric shown on your dashboard uses a **Calorie-Weighted Aggregate** over the 14 days. This means it calculates `(Total Protein / Total Calories)`. By measuring total energy vs total protein over the entire block, we prevent short feeding days (OMAD) from disproportionately punishing your average metrics.
+
     #### Scenarios and Scores
 
-    **Scenario A: The 10/10 Perfect Run**
-    You hit your protein and calorie targets 14 out of 14 days (5 points). Your lowest weight in the second week was 1.5 lbs lighter than the first week (5 points). **Total Score: 10.0.** Your plan is perfectly calibrated—keep going!
+    **Scenario A: The Perfect Run**
+    You score 10/10 points 14 out of 14 days (5 points). Your lowest weight in the second week was 1.5 lbs lighter than the first week (5 points). **Total Score: 10.0.** Your plan is perfectly calibrated—keep going!
 
-    **Scenario B: The 8.5/10 (High Adherence, Slow Movement)**
-    You hit your targets every single day (5.0 points) but your weight only dropped by 0.5 lbs (+3.5 points). **Total Score: 8.5.** You are extremely consistent, but the scale isn't moving fast. This is a signal that you might need to slightly lower your "Calorie Lid" to accelerate fat loss, or keep it exactly where it is if you prefer a slow, muscle-protective recomp.
+    **Scenario B: High Adherence, Slow Movement**
+    You score 10/10 points every single day (5.0 points) but your weight only dropped by 0.5 lbs (+3.5 points). **Total Score: 8.5.** You are extremely consistent, but the scale isn't moving fast. This is a signal that you might need to slightly lower your "Calorie Lid" to accelerate fat loss.
 
-    **Scenario C: The Variable Run (Low Adherence, Weight Gain)**
-    You hit your targets 5 out of 14 days (1.8 points) and your weight increased by 1 lb (-2.0 points). **Total Score: 1.0** (The minimum score). This means the system is detecting a drift from the protocol. This isn't a failure; it's vital feedback. It tells you exactly where to focus—getting back to hitting your daily targets.
+    **Scenario C: Low Adherence, Weight Gain**
+    You average 4/10 points per day (2.0 points) and your weight increased by 1 lb (-2.0 points). **Total Score: 1.0** (The minimum score). This means the system is detecting a drift from the protocol. This isn't a failure; it's vital feedback. It tells you exactly where to focus—getting back to hitting your daily targets.
 
     #### Why Feedback Matters
     We don't manage what we don't measure. By combining your daily input (Adherence) with your biological output (Weight Shift), the Plan Effectiveness Score acts as your compass. It removes the emotion from standing on the scale and replaces it with clear math, empowering you to adjust your approach and reach your goals.
@@ -1906,8 +1992,8 @@ elif st.session_state.view_selection == "📊 Analyze":
         icon_trend = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>'
         icon_clip  = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>'
 
-        tip_protocol = "Rate of days hitting Protein & Calorie targets.&#10;Statuses:&#10;• Optimal (≥85%)&#10;• Inconsistent (70-84%)&#10;• Needs Focus (<70%)"
-        tip_protein = "Average Protein Density (Protein/Calories) across logged days.&#10;Statuses:&#10;• Lean (≥10.5%)&#10;• Moderate (9.5-10.4%)&#10;• Improve (<9.5%)"
+        tip_protocol = "Average daily adherence score (Calories, Dynamic Protein, Fasting Window).&#10;Statuses:&#10;• Optimal (≥85%)&#10;• Inconsistent (70-84%)&#10;• Needs Focus (<70%)"
+        tip_protein = "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).&#10;Statuses:&#10;• Lean (≥10.5%)&#10;• Moderate (9.5-10.4%)&#10;• Improve (<9.5%)"
         tip_weight = "14-day weight shift (Week 1 vs Week 2).&#10;Statuses:&#10;• Losing (≥0.8 lbs drop)&#10;• Steady (0-0.7 lbs drop)&#10;• Gaining (Weight increased)"
         tip_logging = "Percentage of days logged in the past 14 days.&#10;Statuses:&#10;• Consistent (≥80%)&#10;• Partial (60-79%)&#10;• Sparse (<60%)"
 
@@ -1915,7 +2001,7 @@ elif st.session_state.view_selection == "📊 Analyze":
 
         drivers_html = f"""
         <div class="driver-grid">
-            <div class="driver-card" title="{tip_protocol}">{icon_check}<div class="driver-label">Protocol Success</div><div class="driver-value">{drivers['adherent_days']}/{drivers['total_days']} Days</div><div class="driver-status {adherence_status}">{adherence_msg}</div></div>
+            <div class="driver-card" title="{tip_protocol}">{icon_check}<div class="driver-label">Protocol Success</div><div class="driver-value">{drivers['adherent_days']:g}/{drivers['total_days']} Days</div><div class="driver-status {adherence_status}">{adherence_msg}</div></div>
             <div class="driver-card" title="{tip_protein}">{icon_zap}<div class="driver-label">Avg Protein</div><div class="driver-value">{drivers['avg_density']:.1f}%</div><div class="driver-status {density_status}">{density_msg}</div></div>
             <div class="driver-card" title="{tip_weight}">{icon_trend}<div class="driver-label">Weight Trend</div><div class="driver-value">{display_weight:+.1f} lbs</div><div class="driver-status {weight_status}">{weight_msg}</div></div>
             <div class="driver-card" title="{tip_logging}">{icon_clip}<div class="driver-label">Logging Consistency</div><div class="driver-value">{int(logging_pct)}%</div><div class="driver-status {logging_status}">{logging_msg}</div></div>
