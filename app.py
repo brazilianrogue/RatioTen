@@ -982,7 +982,7 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
             calc_date = datetime.now(EASTERN).date()
             
         # --- Demo Mode Shortcut ---
-        if st.session_state.get("demo_mode", False):
+        if st.session_state.get("enable_demo", False):
             drivers = {
                 "adherent_days": 11,
                 "total_days": 13,
@@ -1204,10 +1204,11 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
     except Exception as e:
         return None, f"System Error: {str(e)}", None
 
-def sync_plan_effectiveness_logs():
+def sync_plan_effectiveness_logs(force_resync=False):
     """Backfills and continuously logs the explicit daily plan effectiveness scores to the database."""
-    if st.session_state.get("demo_mode", False): return
+    if st.session_state.get("enable_demo", False): return
     
+    # st.toast("DEBUG: Sync Engine Started!", icon="🔄") # Removed noise, but will show result if forced
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
@@ -1234,9 +1235,9 @@ def sync_plan_effectiveness_logs():
             target_date = now - timedelta(days=i)
             date_str = target_date.strftime("%Y-%m-%d")
             
-            if date_str not in logged_dates:
+            if date_str not in logged_dates or force_resync:
                 # Optimized call with pre-fetched sheet/goals/fasting
-                score, _, drivers = calculate_plan_effectiveness(
+                score, msg, drivers = calculate_plan_effectiveness(
                     calc_date=target_date, 
                     pre_sh=sh, 
                     pre_goals=all_goals, 
@@ -1254,6 +1255,7 @@ def sync_plan_effectiveness_logs():
                     # to match user expectation, while the Plan Score shows the rolling result.
                     day_score = cal_pts + prot_pts + time_pts
                     day_ad_score = day_score / 2.0
+
                     
                     weight_shift = drivers.get("weight_shift", 0.0)
                     
@@ -1265,8 +1267,13 @@ def sync_plan_effectiveness_logs():
                     days_logged_this_run += 1
                     if days_logged_this_run >= 10: # More aggressive batching now that it's optimized
                         break
+                else:
+                    with open("sync_errors.txt", "a") as f:
+                        f.write(f"[{datetime.now(EASTERN)}] Skipped {date_str}: {msg}\n")
     except Exception as e:
-        pass
+        import traceback
+        with open("sync_errors.txt", "a") as f:
+            f.write(f"[{datetime.now(EASTERN)}] Sync Error: {e}\n{traceback.format_exc()}\n")
 
 # Run the sync silently in the background
 if "plan_effectiveness_synced" not in st.session_state:
@@ -2303,5 +2310,15 @@ elif st.session_state.view_selection == "⚙️ Plan":
             st.success(f"Demo mode {'enabled' if new_demo_state else 'disabled'}. Rerunning...")
             time.sleep(1)
             st.rerun()
+
+        st.divider()
+        st.markdown("#### Sync Utility")
+        st.info("Force a re-sync of the Plan Effectiveness logs to the Google Sheet. This will overwrite existing entries for the last 14 days with the current math.")
+        if st.button("Manual Sync Logs", type="primary", use_container_width=True):
+            with st.status("Syncing logs...", expanded=True) as status:
+                sync_plan_effectiveness_logs(force_resync=True)
+                status.update(label="Sync Complete!", state="complete", expanded=False)
+            st.success("Log sync completed successfully!")
+
 
     # End of view-specific content
