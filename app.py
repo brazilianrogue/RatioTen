@@ -1001,6 +1001,7 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
         goals = pre_goals if pre_goals else get_user_goals()
         target_density = 10.0
         target_cal_limit = int(goals.get('calories', 1500)) + 100
+        weight_delta = 0.0
 
         # A 14-day inclusive window means calc_date to 13 days prior
         thirteen_days_ago = calc_date - timedelta(days=13)
@@ -1145,7 +1146,8 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
                 "total_days": total_days_eval,
                 "avg_density": avg_density,
                 "adherence_rate": adherence_rate,
-                "daily_breakdown": daily_breakdown
+                "daily_breakdown": daily_breakdown,
+                "weight_shift": 0.0
             }
 
             # Now enforce the "minimum data for aggregate score" rule
@@ -1161,11 +1163,11 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
             try:
                 weight_ws = sh.worksheet("Weight_Logs")
             except gspread.WorksheetNotFound:
-                return None, "Weight_Logs sheet not found.", None
+                return None, "Weight_Logs sheet not found.", drivers
 
             weight_records = weight_ws.get_all_records()
             if not weight_records:
-                return None, "No weight data found.", None
+                return None, "No weight data found.", drivers
 
             df_weight = pd.DataFrame(weight_records)
             col_map_w = {col.lower().strip(): col for col in df_weight.columns}
@@ -1173,25 +1175,26 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
             weight_col = next((col_map_w[c] for c in ['weight (lbs)', 'weight', 'lbs'] if c in col_map_w), None)
 
             if not date_col or not weight_col:
-                return None, f"Weight_Logs columns not found. Got: {list(df_weight.columns)}", None
+                return None, f"Weight_Logs columns not found. Got: {list(df_weight.columns)}", drivers
 
             df_weight['Date'] = pd.to_datetime(df_weight[date_col], errors='coerce').dt.date
             df_weight['Weight'] = pd.to_numeric(df_weight[weight_col], errors='coerce')
             df_recent = df_weight[(df_weight['Date'] >= thirteen_days_ago) & (df_weight['Date'] <= calc_date)].dropna(subset=['Weight'])
 
             if len(df_recent) < 4:
-                return None, f"Need 4+ weigh-ins in 14 days. Have {len(df_recent)}.", None
+                return None, f"Need 4+ weigh-ins in 14 days. Have {len(df_recent)}.", drivers
 
             first_half = df_recent[df_recent['Date'] < seven_days_ago]
             second_half = df_recent[df_recent['Date'] >= seven_days_ago]
 
             if first_half.empty or second_half.empty:
-                return None, "Need weigh-ins in both weeks of the 14-day window.", None
+                return None, "Need weigh-ins in both weeks of the 14-day window.", drivers
 
             weight_delta = float(first_half['Weight'].min()) - float(second_half['Weight'].min())
+            drivers["weight_shift"] = weight_delta
 
         except Exception as e:
-            return None, f"Error parsing weight logs: {str(e)}", None
+            return None, f"Error parsing weight logs: {str(e)}", drivers
 
         # --- 3. Score Calculation ---
         score = adherence_rate * 5.0
