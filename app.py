@@ -235,15 +235,6 @@ st.markdown("""
         gap: 0 !important;
     }
 
-    /* Hide file uploader drag label — just show the button */
-    [data-testid="stFileUploaderDropzone"] small,
-    [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
-    [data-testid="stFileUploaderDropzone"] {
-        padding: 6px 10px !important;
-        min-height: 0 !important;
-        border-radius: 8px !important;
-    }
-
     /* Timeline styles */
     .timeline-wrapper {
         width: 100%;
@@ -2000,32 +1991,26 @@ if st.session_state.view_selection == "🍽️ Log":
 <div id="ch">{inner}</div>
 """
 
-    components.html(_render_chat_history(st.session_state.messages), height=380, scrolling=False)
+    components.html(_render_chat_history(st.session_state.messages), height=480, scrolling=False)
 
     # --- 6. Chat Input Support (Log View Only) ---
     with st.container():
         if st.session_state.pending_image:
-            col_info, col_clear = st.columns([9, 1])
-            with col_info:
-                st.markdown(
-                    '<div style="background:#1a3550;padding:7px 12px;border-radius:6px;'
-                    'border-left:4px solid #00A6FF;font-size:0.85rem;color:#9dcfee;">'
-                    '📷 <b>Photo attached</b> — add a description below and submit</div>',
-                    unsafe_allow_html=True
-                )
-            with col_clear:
-                if st.button("✕", help="Remove photo", use_container_width=True):
-                    st.session_state.pending_image = None
-                    st.rerun()
-        else:
-            uploaded_file = st.file_uploader(
-                "Attach a photo",
-                type=["jpg", "jpeg", "png", "webp"],
-                label_visibility="collapsed",
-                key="meal_photo_uploader",
+            st.markdown(
+                '<div style="background:#1a3550;padding:7px 12px;border-radius:6px;'
+                'border-left:4px solid #00A6FF;font-size:0.85rem;color:#9dcfee;">'
+                '📷 <b>Photo attached</b> — describe your meal below and submit</div>',
+                unsafe_allow_html=True
             )
-            if uploaded_file is not None:
-                st.session_state.pending_image = uploaded_file.getvalue()
+        if st.session_state.show_camera:
+            captured_file = st.camera_input("Capture your meal", label_visibility="collapsed")
+            if captured_file:
+                st.session_state.pending_image = captured_file.getvalue()
+                st.session_state.show_camera = False
+                st.rerun()
+        if not st.session_state.show_camera and not st.session_state.pending_image:
+            if st.button("📷 Open Camera", use_container_width=True):
+                st.session_state.show_camera = True
                 st.rerun()
 
     user_input = st.chat_input("Describe your meal...")
@@ -2189,6 +2174,7 @@ if st.session_state.view_selection == "🍽️ Log":
                     st.session_state.messages.append({"role": "assistant", "content": display_text})
                     log_chat_to_sheet("assistant", display_text)
                     st.session_state.pending_image = None
+                    st.session_state.show_camera = False
                     st.rerun()
 
 elif st.session_state.view_selection == "📊 Analyze":
