@@ -247,8 +247,8 @@ st.markdown("""
         padding: 0 !important;
         background-color: #23252f !important;
         border: 1px solid rgba(255,255,255,0.08) !important;
-        width: 52px !important;
-        min-width: 52px !important;
+        width: 100% !important;
+        min-width: 0 !important;
     }
     /* Debug colorization — remove when done */
     [data-section="debug-nav"] { outline: 2px solid rgba(255,80,80,0.6) !important; }
@@ -1563,8 +1563,10 @@ nav_html = f"""
   body {{
     margin: 0;
     padding: 0;
+    /* Push nav bar below iOS Dynamic Island / notch via CSS env() */
+    padding-top: env(safe-area-inset-top, 0px);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background-color: transparent;
+    background: #0e1117; /* match page so safe-area zone blends seamlessly */
   }}
   .nav-bar {{
     display: flex;
@@ -1652,23 +1654,12 @@ nav_html = f"""
   
   // Bridge is now handled in the main st.markdown block for cleaner scope
 
-  // Pin nav to top of viewport, respecting iOS safe-area-inset-top
-  // (Dynamic Island / notch). Uses same cross-window DOM pattern as switchTab().
-  function getSafeTop() {{
-    try {{
-      const d = window.parent.document;
-      const t = d.createElement('div');
-      t.style.cssText = 'position:fixed;top:0;padding-top:env(safe-area-inset-top,0px);pointer-events:none;';
-      d.body.appendChild(t);
-      const v = parseFloat(window.parent.getComputedStyle(t).paddingTop) || 0;
-      d.body.removeChild(t);
-      return v;
-    }} catch(e) {{ return 0; }}
-  }}
+  // Pin nav to top of viewport.
+  // Safe-area offset is handled by body padding-top:env(safe-area-inset-top)
+  // directly in this iframe's CSS, so we never add paddingTop to the
+  // Streamlit container (avoids overflow:hidden clipping the iframe).
   function pinNav() {{
     try {{
-      const safeTop = getSafeTop();
-      const totalH = Math.round(safeTop + 76); // safe area + nav bar + padding
       const iframe = window.frameElement;
       if (!iframe) return;
       let el = iframe;
@@ -1678,18 +1669,21 @@ nav_html = f"""
         if (p && p.getAttribute('data-testid') === 'stVerticalBlock') {{
           if (el.style.position !== 'fixed') {{
             el.style.position = 'fixed';
+            el.style.top = '0';
             el.style.left = '0';
             el.style.right = '0';
             el.style.zIndex = '9999';
-            el.style.background = '#0e1117';
-            el.style.padding = '8px';
-            el.style.paddingTop = (safeTop + 8) + 'px';
             el.style.width = '100vw';
-            el.style.boxSizing = 'border-box';
             el.style.margin = '0';
+            el.style.padding = '0';
+            el.style.background = 'transparent';
+            el.style.overflow = 'visible';
+            el.style.boxSizing = 'border-box';
           }}
-          el.style.top = '0';
-          const want = totalH + 'px';
+          // Compensate page layout: push content below the fixed nav.
+          // Use iframe's rendered height (includes safe-area padding from CSS).
+          const navH = (iframe.offsetHeight || 140) + 4;
+          const want = navH + 'px';
           if (p.style.paddingTop !== want) p.style.paddingTop = want;
           return;
         }}
@@ -1758,7 +1752,7 @@ nav_html = f"""
 </body>
 </html>
 """
-components.html(nav_html, height=72)
+components.html(nav_html, height=140)
 
 # Hidden callback bridge
 def set_view(view):
