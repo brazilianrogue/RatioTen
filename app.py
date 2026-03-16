@@ -130,11 +130,14 @@ st.markdown("""
         height: 0 !important;
     }
     
-    /* Reduce the default Streamlit padding for better vertical use */
+    /* Reduce the default Streamlit padding for better use of space */
     .block-container {
-        padding-top: 1px !important; /* Hug the top as requested */
+        padding-top: 1px !important;
         padding-bottom: 0rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
         margin-top: 0px !important;
+        max-width: 100% !important;
     }
 
     /* Target the gaps between blocks */
@@ -217,6 +220,16 @@ st.markdown("""
     }
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
+
+    /* Inline camera button — compact square, matches chat input row height */
+    div[data-testid="stColumn"]:last-child .stButton button {
+        height: 52px !important;
+        border-radius: 12px !important;
+        font-size: 1.2rem !important;
+        padding: 0 !important;
+        background-color: #23252f !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+    }
 
     /* Hide avatars on native st.chat_message (used for live exchange only) */
     [data-testid="stChatMessageAvatarUser"],
@@ -2026,26 +2039,36 @@ if st.session_state.view_selection == "🍽️ Log":
     components.html(_render_chat_history(st.session_state.messages), height=380, scrolling=False)
 
     # --- 6. Chat Input Support (Log View Only) ---
-    with st.container():
-        if st.session_state.pending_image:
-            st.markdown(
-                '<div style="background:#1a3550;padding:7px 12px;border-radius:6px;'
-                'border-left:4px solid #00A6FF;font-size:0.85rem;color:#9dcfee;">'
-                '📷 <b>Photo attached</b> — describe your meal below and submit</div>',
-                unsafe_allow_html=True
-            )
-        if st.session_state.show_camera:
-            captured_file = st.camera_input("Capture your meal", label_visibility="collapsed")
-            if captured_file:
-                st.session_state.pending_image = captured_file.getvalue()
-                st.session_state.show_camera = False
-                st.rerun()
-        if not st.session_state.show_camera and not st.session_state.pending_image:
-            if st.button("📷 Open Camera", use_container_width=True):
-                st.session_state.show_camera = True
-                st.rerun()
 
-    user_input = st.chat_input("Describe your meal...")
+    # Camera widget — full width, shown above input when active
+    if st.session_state.show_camera:
+        captured_file = st.camera_input("Capture your meal", label_visibility="collapsed")
+        if captured_file:
+            st.session_state.pending_image = captured_file.getvalue()
+            st.session_state.show_camera = False
+            st.rerun()
+
+    # Pending image banner
+    if st.session_state.pending_image:
+        st.markdown(
+            '<div style="background:#1a3550;padding:6px 12px;border-radius:6px;'
+            'border-left:4px solid #00A6FF;font-size:0.82rem;color:#9dcfee;margin-bottom:4px;">'
+            '📷 <b>Photo attached</b> — describe your meal and submit</div>',
+            unsafe_allow_html=True
+        )
+
+    # Chat input + camera button side by side
+    col_input, col_cam = st.columns([10, 1])
+    with col_input:
+        user_input = st.chat_input("Describe your meal...")
+    with col_cam:
+        cam_icon = "✕" if st.session_state.pending_image else "📷"
+        if st.button(cam_icon, use_container_width=True, key="cam_inline"):
+            if st.session_state.pending_image:
+                st.session_state.pending_image = None
+            else:
+                st.session_state.show_camera = not st.session_state.show_camera
+            st.rerun()
 
     if user_input:
         # 1. Prepare segments for UI and Gemini
