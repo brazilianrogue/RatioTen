@@ -142,8 +142,12 @@ st.markdown("""
         gap: 5px !important; /* Tighter 5px gap as requested */
     }
 
-    /* Specific override for the custom nav container spacing */
+    /* Sticky nav — locks to top when scrolling */
     div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHtml"]) {
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        background-color: #0e1117;
         margin-bottom: 0px !important;
         margin-top: 0px !important;
     }
@@ -181,12 +185,12 @@ st.markdown("""
         display: flex;
         justify-content: space-between;
         gap: 8px;
-        margin-bottom: 20px;
+        margin-bottom: 10px;
     }
     .metric-card {
         background-color: #31333F;
         color: white;
-        padding: 15px 10px;
+        padding: 8px 10px;
         border-radius: 10px;
         flex: 1;
         min-width: 0;
@@ -195,19 +199,19 @@ st.markdown("""
         flex-direction: column;
         align-items: flex-start;
         justify-content: flex-start;
-        min-height: 110px;
+        min-height: 80px;
     }
     .metric-label {
         font-size: 0.75rem;
         color: #e0e0e0;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
         white-space: nowrap;
         width: 100%;
     }
     .metric-value {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         font-weight: 700;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
     }
     .metric-delta {
         font-size: 0.7rem;
@@ -217,7 +221,29 @@ st.markdown("""
     }
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
-    
+
+    /* Hide avatars on native st.chat_message (used for live exchange only) */
+    [data-testid="stChatMessageAvatarUser"],
+    [data-testid="stChatMessageAvatarAssistant"],
+    [data-testid="chatAvatarIcon-user"],
+    [data-testid="chatAvatarIcon-assistant"],
+    .stChatMessageAvatar {
+        display: none !important;
+    }
+    [data-testid="stChatMessage"] {
+        padding: 4px 0 !important;
+        gap: 0 !important;
+    }
+
+    /* Hide file uploader drag label — just show the button */
+    [data-testid="stFileUploaderDropzone"] small,
+    [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
+    [data-testid="stFileUploaderDropzone"] {
+        padding: 6px 10px !important;
+        min-height: 0 !important;
+        border-radius: 8px !important;
+    }
+
     /* Timeline styles */
     .timeline-wrapper {
         width: 100%;
@@ -1898,40 +1924,108 @@ if st.session_state.view_selection == "🍽️ Log":
                 
         st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt, history=formatted_history)
 
-    # Display previous chat messages in a fixed-height container (optimized for Pro Max)
-    with st.container(height=450):
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                content = message["content"]
-                if isinstance(content, list):
-                    for item in content:
-                        st.write(item)
+    # Build compact HTML chat history — column-reverse flex keeps newest at bottom
+    # instantly (no scroll animation), eliminating the "fly-by" on load.
+    def _render_chat_history(messages):
+        import html as _html, re as _re
+
+        def md_to_html(text):
+            text = _html.escape(text)
+            # Bold / italic
+            text = _re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
+            text = _re.sub(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', r'<em>\1</em>', text)
+            # Bullet lists
+            lines = text.split('\n')
+            out, in_list = [], False
+            for line in lines:
+                stripped = line.strip()
+                if _re.match(r'^[-•]\s', stripped):
+                    if not in_list:
+                        out.append('<ul style="margin:4px 0;padding-left:16px;">')
+                        in_list = True
+                    out.append(f'<li>{stripped[2:].strip()}</li>')
                 else:
-                    st.markdown(content)
+                    if in_list:
+                        out.append('</ul>')
+                        in_list = False
+                    out.append(line)
+            if in_list:
+                out.append('</ul>')
+            text = '\n'.join(out)
+            text = _re.sub(r'\n\n+', '</p><p>', text)
+            text = text.replace('\n', '<br>')
+            return f'<p style="margin:0">{text}</p>'
+
+        bubble_rows = []
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            if isinstance(content, list):
+                text = "\n".join(str(i) for i in content)
+            else:
+                text = str(content)
+
+            is_user = role == "user"
+            justify = "flex-end" if is_user else "flex-start"
+            bg      = "#1a3550" if is_user else "#23252f"
+            border  = "1px solid rgba(252,163,17,0.22)" if is_user else "1px solid rgba(255,255,255,0.07)"
+            radius  = "14px 14px 4px 14px" if is_user else "14px 14px 14px 4px"
+            color   = "#dce8f5" if is_user else "#d8d8e0"
+
+            bubble_rows.append(
+                f'<div style="display:flex;justify-content:{justify};margin:3px 0;">'
+                f'<div style="max-width:84%;background:{bg};border:{border};border-radius:{radius};'
+                f'padding:7px 11px;font-size:0.875rem;line-height:1.5;color:{color};word-break:break-word;">'
+                f'{md_to_html(text)}'
+                f'</div></div>'
+            )
+
+        # DOM order newest-first so column-reverse flex shows newest at visual bottom
+        inner = "\n".join(reversed(bubble_rows)) if bubble_rows else (
+            '<div style="color:#555;font-size:0.8rem;text-align:center;padding:20px 0;">'
+            'No messages yet — describe a meal to get started.</div>'
+        )
+
+        return f"""
+<style>
+  body{{margin:0;background:transparent;
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}}
+  #ch{{height:360px;overflow-y:auto;display:flex;flex-direction:column-reverse;
+       padding:8px 4px;background:#0e1117;border-radius:8px;
+       scrollbar-width:thin;scrollbar-color:#2a2a2a transparent;}}
+  #ch::-webkit-scrollbar{{width:4px;}}
+  #ch::-webkit-scrollbar-track{{background:transparent;}}
+  #ch::-webkit-scrollbar-thumb{{background:#2a2a2a;border-radius:2px;}}
+</style>
+<div id="ch">{inner}</div>
+"""
+
+    components.html(_render_chat_history(st.session_state.messages), height=380, scrolling=False)
 
     # --- 6. Chat Input Support (Log View Only) ---
-    # Moved the camera logic directly above the chat input
     with st.container():
-        # Status indicator for pending image
         if st.session_state.pending_image:
-            st.markdown("""
-            <div style="background-color: #1E3A5F; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #00A6FF;">
-                📷 <b>Photo Attached:</b> Describing your meal below will submit both the text and the photo.
-            </div>
-            """, unsafe_allow_html=True)
-            
-        if st.session_state.show_camera:
-            captured_file = st.camera_input("Capture your meal", label_visibility="collapsed")
-            if captured_file:
-                st.session_state.pending_image = captured_file.getvalue()
-                st.success("Photo attached!")
-                st.session_state.show_camera = False # Hide camera after capture
-                st.rerun()
-                
-        # Camera button is directly above the chat input, without large headers
-        if not st.session_state.show_camera and not st.session_state.pending_image:
-            if st.button("📷 Open Camera", use_container_width=True):
-                st.session_state.show_camera = True
+            col_info, col_clear = st.columns([9, 1])
+            with col_info:
+                st.markdown(
+                    '<div style="background:#1a3550;padding:7px 12px;border-radius:6px;'
+                    'border-left:4px solid #00A6FF;font-size:0.85rem;color:#9dcfee;">'
+                    '📷 <b>Photo attached</b> — add a description below and submit</div>',
+                    unsafe_allow_html=True
+                )
+            with col_clear:
+                if st.button("✕", help="Remove photo", use_container_width=True):
+                    st.session_state.pending_image = None
+                    st.rerun()
+        else:
+            uploaded_file = st.file_uploader(
+                "Attach a photo",
+                type=["jpg", "jpeg", "png", "webp"],
+                label_visibility="collapsed",
+                key="meal_photo_uploader",
+            )
+            if uploaded_file is not None:
+                st.session_state.pending_image = uploaded_file.getvalue()
                 st.rerun()
 
     user_input = st.chat_input("Describe your meal...")
@@ -2095,7 +2189,6 @@ if st.session_state.view_selection == "🍽️ Log":
                     st.session_state.messages.append({"role": "assistant", "content": display_text})
                     log_chat_to_sheet("assistant", display_text)
                     st.session_state.pending_image = None
-                    st.session_state.show_camera = False
                     st.rerun()
 
 elif st.session_state.view_selection == "📊 Analyze":
