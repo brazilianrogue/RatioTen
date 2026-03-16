@@ -221,29 +221,40 @@ st.markdown("""
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
 
-    /* Pull the camera-button column row up to visually overlap the chat input.
-       st.chat_input() escapes its column and renders full-width; the sibling
-       column (camera button) renders below it. Negative margin-top + z-index
-       brings it back up, and pointer-events:none on the empty left column lets
-       taps pass through to the chat input underneath. */
-    div[data-testid="stVerticalBlock"] > div:last-child:has([data-testid="stHorizontalBlock"]) {
-        margin-top: -58px !important;
-        position: relative !important;
-        z-index: 200 !important;
-        pointer-events: none !important;
+    /* Chat form styling */
+    [data-testid="stForm"] {
+        background: transparent !important;
+        border: none !important;
+        padding: 0 !important;
     }
-    div[data-testid="stVerticalBlock"] > div:last-child:has([data-testid="stHorizontalBlock"]) [data-testid="stColumn"]:last-child {
-        pointer-events: all !important;
+    [data-testid="stForm"] [data-testid="stHorizontalBlock"] {
+        gap: 6px !important;
+        align-items: flex-end !important;
     }
-    /* Camera icon button style */
-    div[data-testid="stVerticalBlock"] > div:last-child [data-testid="stColumn"]:last-child .stButton button {
+    [data-testid="stForm"] input[type="text"] {
+        background-color: #1e2029 !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        border-radius: 24px !important;
+        color: #fff !important;
+        padding: 12px 18px !important;
+        font-size: 1rem !important;
         height: 52px !important;
-        border-radius: 12px !important;
+    }
+    [data-testid="stForm"] [data-testid="stFormSubmitButton"] button {
+        height: 52px !important;
+        border-radius: 50% !important;
         font-size: 1.2rem !important;
         padding: 0 !important;
         background-color: #23252f !important;
         border: 1px solid rgba(255,255,255,0.08) !important;
+        width: 52px !important;
+        min-width: 52px !important;
     }
+    /* Debug colorization — remove when done */
+    [data-section="debug-nav"] { outline: 2px solid rgba(255,80,80,0.6) !important; }
+    [data-section="debug-cards"] { outline: 2px solid rgba(80,255,80,0.6) !important; }
+    [data-section="debug-chat"] { outline: 2px solid rgba(80,160,255,0.6) !important; }
+    [data-section="debug-input"] { outline: 2px solid rgba(255,220,0,0.6) !important; }
 
     /* Hide avatars on native st.chat_message (used for live exchange only) */
     [data-testid="stChatMessageAvatarUser"],
@@ -1641,11 +1652,23 @@ nav_html = f"""
   
   // Bridge is now handled in the main st.markdown block for cleaner scope
 
-  // Pin nav to top of viewport by fixing its container in the parent DOM.
-  // Uses the same cross-window DOM access pattern as switchTab().
-  // Runs immediately and on a short interval to survive Streamlit rerenders.
+  // Pin nav to top of viewport, respecting iOS safe-area-inset-top
+  // (Dynamic Island / notch). Uses same cross-window DOM pattern as switchTab().
+  function getSafeTop() {{
+    try {{
+      const d = window.parent.document;
+      const t = d.createElement('div');
+      t.style.cssText = 'position:fixed;top:0;padding-top:env(safe-area-inset-top,0px);pointer-events:none;';
+      d.body.appendChild(t);
+      const v = parseFloat(window.parent.getComputedStyle(t).paddingTop) || 0;
+      d.body.removeChild(t);
+      return v;
+    }} catch(e) {{ return 0; }}
+  }}
   function pinNav() {{
     try {{
+      const safeTop = getSafeTop();
+      const totalH = Math.round(safeTop + 76); // safe area + nav bar + padding
       const iframe = window.frameElement;
       if (!iframe) return;
       let el = iframe;
@@ -1655,19 +1678,19 @@ nav_html = f"""
         if (p && p.getAttribute('data-testid') === 'stVerticalBlock') {{
           if (el.style.position !== 'fixed') {{
             el.style.position = 'fixed';
-            el.style.top = '0';
             el.style.left = '0';
             el.style.right = '0';
             el.style.zIndex = '9999';
             el.style.background = '#0e1117';
             el.style.padding = '8px';
+            el.style.paddingTop = (safeTop + 8) + 'px';
             el.style.width = '100vw';
             el.style.boxSizing = 'border-box';
             el.style.margin = '0';
           }}
-          if (p.style.paddingTop !== '76px') {{
-            p.style.paddingTop = '76px';
-          }}
+          el.style.top = '0';
+          const want = totalH + 'px';
+          if (p.style.paddingTop !== want) p.style.paddingTop = want;
           return;
         }}
       }}
@@ -1817,6 +1840,7 @@ if st.session_state.view_selection == "🍽️ Log":
     lowest_w = get_lowest_weight()
 
     dashboard_html = f"""
+    <div style="outline:2px solid rgba(80,255,80,0.6);padding:2px;"><!-- DEBUG:cards -->
     <div class="metric-container">
         <div class="metric-card" style="border: 1px solid #00A6FF;">
             <div class="metric-label">Status</div>
@@ -1829,6 +1853,7 @@ if st.session_state.view_selection == "🍽️ Log":
             <div class="metric-delta delta-green">lbs</div>
         </div>
     </div>
+    </div><!-- /DEBUG:cards -->
     """
     st.markdown(dashboard_html, unsafe_allow_html=True)
 
@@ -1884,6 +1909,7 @@ if st.session_state.view_selection == "🍽️ Log":
 
     # Metric Row (Daily Targets)
     metric_html = f"""
+    <div style="outline:2px solid rgba(80,255,80,0.6);padding:2px;"><!-- DEBUG:metric -->
     <div class="metric-container">
         <div class="metric-card">
             <div class="metric-label">Calories</div>
@@ -1905,6 +1931,7 @@ if st.session_state.view_selection == "🍽️ Log":
             <div class="metric-delta delta-green">Target: 10%</div>
         </div>
     </div>
+    </div><!-- /DEBUG:metric -->
     """
     st.markdown(metric_html, unsafe_allow_html=True)
     
@@ -2041,6 +2068,7 @@ if st.session_state.view_selection == "🍽️ Log":
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}}
   #ch{{height:430px;overflow-y:auto;display:flex;flex-direction:column-reverse;
        padding:8px 4px;background:#0e1117;border-radius:8px;
+       outline:2px solid rgba(80,160,255,0.6);
        scrollbar-width:thin;scrollbar-color:#2a2a2a transparent;}}
   #ch::-webkit-scrollbar{{width:4px;}}
   #ch::-webkit-scrollbar-track{{background:transparent;}}
@@ -2071,18 +2099,31 @@ if st.session_state.view_selection == "🍽️ Log":
             unsafe_allow_html=True
         )
 
-    # Chat input + camera button side by side
-    col_input, col_cam = st.columns([10, 1])
-    with col_input:
-        user_input = st.chat_input("Describe your meal...")
-    with col_cam:
-        cam_icon = "✕" if st.session_state.pending_image else "📷"
-        if st.button(cam_icon, use_container_width=True, key="cam_inline"):
-            if st.session_state.pending_image:
-                st.session_state.pending_image = None
-            else:
-                st.session_state.show_camera = not st.session_state.show_camera
-            st.rerun()
+    # Chat input form — st.form() respects column layout unlike st.chat_input()
+    st.markdown('<div data-section="debug-input">', unsafe_allow_html=True)
+    with st.form("chat_form", clear_on_submit=True):
+        col_text, col_send, col_cam = st.columns([8, 1, 1])
+        with col_text:
+            user_input_text = st.text_input(
+                "meal_input",
+                placeholder="Describe your meal...",
+                label_visibility="collapsed"
+            )
+        with col_send:
+            submitted = st.form_submit_button("↑", use_container_width=True)
+        with col_cam:
+            cam_label = "✕" if st.session_state.pending_image else "📷"
+            cam_pressed = st.form_submit_button(cam_label, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if cam_pressed:
+        if st.session_state.pending_image:
+            st.session_state.pending_image = None
+        else:
+            st.session_state.show_camera = not st.session_state.show_camera
+        st.rerun()
+
+    user_input = user_input_text if submitted else None
 
     if user_input:
         # 1. Prepare segments for UI and Gemini
