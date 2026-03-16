@@ -1,20 +1,55 @@
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from datetime import datetime, timedelta
+from typing import Optional
+
+import gspread
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
-import gspread
-import pandas as pd
-import base64
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-import json
-import re
-import time
-import persona
 
-EASTERN = ZoneInfo("America/New_York")
-PRIMARY_MODEL = "gemini-3-pro-preview"
-SECONDARY_MODEL = "gemini-2.5-flash"
-STABLE_MODEL = "gemini-2.0-flash"
+import persona
+from constants import (
+    EASTERN,
+    PRIMARY_MODEL,
+    SECONDARY_MODEL,
+    STABLE_MODEL,
+    TIMELINE_LANE_BASE_OFFSET_PX,
+    TIMELINE_LANE_HEIGHT_PX,
+    WS_CHAT_HISTORY,
+)
+from scoring import calculate_plan_effectiveness, sync_plan_effectiveness_logs
+from sheets_client import MealLogEntry
+
+log = logging.getLogger(__name__)
+
+
+def parse_meal_log(raw: str) -> list[MealLogEntry] | None:
+    """Parse and validate a JSON meal-log block returned by the AI.
+
+    Returns a list of validated MealLogEntry dicts, or ``None`` if parsing
+    or schema validation fails.
+    """
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            return None
+        required_keys = set(MealLogEntry.__annotations__.keys())
+        validated: list[MealLogEntry] = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                return None
+            if not required_keys.issubset(entry.keys()):
+                return None
+            validated.append(entry)  # type: ignore[arg-type]
+        return validated if validated else None
+    except Exception:
+        return None
 
 # --- 1. Page Configuration & Custom CSS ---
 from PIL import Image
@@ -281,7 +316,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-def render_section_header(icon_svg, title):
+def render_section_header(icon_svg: str, title: str) -> None:
     """Renders a premium, consistent section header."""
     header_html = f"""
     <div class="section-header">
@@ -371,7 +406,7 @@ def get_google_sheet():
     gc = gspread.service_account_from_dict(credentials_dict)
     return gc.open("Nutrition_Logs")
 
-def render_page_header(icon_svg, title):
+def render_page_header(icon_svg: str, title: str) -> None:
     """Renders a prominent page-level title, visually distinct from section headers."""
     # Replace the section icon class with a larger page-icon class
     icon = icon_svg.replace('class="lucide', 'class="page-icon lucide')
@@ -402,7 +437,13 @@ def render_page_header(icon_svg, title):
     <div class="page-header-bar">{icon}<span class="page-header-text">{title}</span></div>
     """, unsafe_allow_html=True)
 
-def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, title=None):
+def render_timeline_html(
+    start_time_str: str,
+    end_time_str: str,
+    logs: list,
+    progress_pct: Optional[float] = None,
+    title: Optional[str] = None,
+) -> str:
     """
     Renders a bimodal, clustered timeline with reduced emoji sizes.
     """
@@ -478,9 +519,9 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
             # Positioning
             badge_html = f'<div class="timeline-emoji-cluster-badge">+{count-1}</div>' if count > 1 else ""
             
-            # Vertical math
-            # lane 0: 15px from bar, lane 1: 40px from bar
-            offset_val = 15 + (lane_idx * 25)
+            # Vertical math: lane 0 sits TIMELINE_LANE_BASE_OFFSET_PX from the bar;
+            # each additional lane adds TIMELINE_LANE_HEIGHT_PX.
+            offset_val = TIMELINE_LANE_BASE_OFFSET_PX + (lane_idx * TIMELINE_LANE_HEIGHT_PX)
             
             if side == "top":
                 stem_html = f'<div class="timeline-stem" style="height: {offset_val}px; margin-top: 2px;"></div>'
@@ -520,7 +561,7 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
 
 # --- Database Setup ---
 @st.cache_data(ttl=600)
-def get_trailing_7_days_data():
+def get_trailing_7_days_data() -> pd.DataFrame:
     # Define expected columns
     expected_cols = ["Date", "Item", "Calories", "Protein", "Density"]
     try:
@@ -569,11 +610,11 @@ def get_trailing_7_days_data():
         return pd.DataFrame(columns=expected_cols)
 
 @st.cache_data(ttl=60)
-def get_today_log_for_timeline():
+def get_today_log_for_timeline() -> list:
     return get_logs_for_history(days=0)
 
 @st.cache_data(ttl=300)
-def get_logs_for_history(days=10):
+def get_logs_for_history(days: int = 10) -> "list | dict":
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
@@ -619,7 +660,7 @@ def get_logs_for_history(days=10):
         return [] if days == 0 else {}
 
 @st.cache_data(ttl=600)
-def get_wow_data(enable_demo=False):
+def get_wow_data(enable_demo: bool = False) -> pd.DataFrame:
     expected_cols = ["Week", "Avg Calories", "Avg Protein", "Density"]
     if enable_demo:
         # Generate 4 weeks of demo data
@@ -689,7 +730,7 @@ def get_wow_data(enable_demo=False):
         return pd.DataFrame(columns=expected_cols)
 
 @st.cache_data(ttl=3600)
-def get_lowest_weight():
+def get_lowest_weight() -> Optional[float]:
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
@@ -710,7 +751,7 @@ def get_lowest_weight():
         return None
 
 @st.cache_data(ttl=600)
-def get_fasting_schedule():
+def get_fasting_schedule() -> dict:
     default_schedule = {
         "Monday": {"start": None, "end": None},
         "Tuesday": {"start": "12:00", "end": "18:00"},
@@ -748,7 +789,7 @@ def get_fasting_schedule():
     except Exception as e:
         return default_schedule
 
-def get_fasting_status(schedule):
+def get_fasting_status(schedule: dict) -> "tuple[str, Optional[float]]":
     now = datetime.now(EASTERN)
     day_name = now.strftime("%A")
     today_sched = schedule.get(day_name, {"start": None, "end": None})
@@ -780,7 +821,7 @@ def get_fasting_status(schedule):
     
     return "No Schedule", None
 
-def log_to_sheet(item, calories, protein, density, emoji="🍽️"):
+def log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: str = "🍽️") -> bool:
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
@@ -802,7 +843,6 @@ def log_to_sheet(item, calories, protein, density, emoji="🍽️"):
         return False
 
 # --- Chat Persistence Helpers ---
-CHAT_HISTORY_WS = "Chat_History"
 
 @st.cache_data(ttl=600)
 def get_persistent_chat():
@@ -811,9 +851,9 @@ def get_persistent_chat():
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
-            worksheet = sh.worksheet(CHAT_HISTORY_WS)
+            worksheet = sh.worksheet(WS_CHAT_HISTORY)
         except gspread.WorksheetNotFound:
-            worksheet = sh.add_worksheet(title=CHAT_HISTORY_WS, rows="1000", cols="3")
+            worksheet = sh.add_worksheet(title=WS_CHAT_HISTORY, rows="1000", cols="3")
             worksheet.append_row(["Timestamp", "Role", "Parts"])
             return []
             
@@ -844,7 +884,7 @@ def log_chat_to_sheet(role, content):
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
-            worksheet = sh.worksheet(CHAT_HISTORY_WS)
+            worksheet = sh.worksheet(WS_CHAT_HISTORY)
         except:
             return
             
@@ -869,7 +909,7 @@ def clear_persistent_chat():
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
-        worksheet = sh.worksheet(CHAT_HISTORY_WS)
+        worksheet = sh.worksheet(WS_CHAT_HISTORY)
         worksheet.clear()
         worksheet.append_row(["Timestamp", "Role", "Parts"])
         get_persistent_chat.clear()
@@ -944,7 +984,7 @@ def save_fasting_schedule(schedule_dict):
         return False
 
 @st.cache_data(ttl=600)
-def get_user_goals():
+def get_user_goals() -> dict:
     default_goals = {"calories": 1500, "protein": 150}
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
@@ -975,8 +1015,8 @@ def get_user_goals():
     except Exception as e:
         return default_goals
 
-def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pre_fasting=None):
-    """Calculates a score (1-10) based on 14-day adherence and weight shift."""
+def _calculate_plan_effectiveness_legacy(calc_date=None, pre_sh=None, pre_goals=None, pre_fasting=None):  # noqa: dead-code – moved to scoring.py
+    """Legacy copy – superseded by scoring.calculate_plan_effectiveness."""
     try:
         if calc_date is None:
             calc_date = datetime.now(EASTERN).date()
@@ -1212,8 +1252,8 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
     except Exception as e:
         return None, f"System Error: {str(e)}", None
 
-def sync_plan_effectiveness_logs(force_resync=False):
-    """Backfills and continuously logs the explicit daily plan effectiveness scores to the database."""
+def _sync_plan_effectiveness_logs_legacy(force_resync=False):  # noqa: dead-code – moved to scoring.py
+    """Legacy copy – superseded by scoring.sync_plan_effectiveness_logs."""
     if st.session_state.get("enable_demo", False): return
     
     # st.toast("DEBUG: Sync Engine Started!", icon="🔄") # Removed noise, but will show result if forced
@@ -1294,13 +1334,29 @@ def sync_plan_effectiveness_logs(force_resync=False):
             f.write(f"[{datetime.now(EASTERN)}] Sync Error: {e}\n{traceback.format_exc()}\n")
 
 
+# Fetch shared config once at module level (used by sync, system prompt, and UI)
+fasting_schedule = get_fasting_schedule()
+custom_instructions = get_custom_instructions()
+user_goals = get_user_goals()
+
 # Run the sync silently in the background
 if "plan_effectiveness_synced" not in st.session_state:
     st.session_state.plan_effectiveness_synced = True
-    sync_plan_effectiveness_logs()
+    sync_plan_effectiveness_logs(
+        goals=user_goals,
+        fasting=fasting_schedule,
+        demo_mode=st.session_state.get("enable_demo", False),
+    )
 
 # --- 3. System Prompt (The Rules Engine) ---
-def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None, weekly_summary=None, today_logs=None):
+def get_system_prompt(
+    schedule: dict,
+    goals: dict,
+    custom_instructions: str = "",
+    today_stats: Optional[dict] = None,
+    weekly_summary: Optional[pd.DataFrame] = None,
+    today_logs: Optional[list] = None,
+) -> str:
     now = datetime.now(EASTERN)
     current_day = now.strftime("%A")
     current_date = now.strftime("%Y-%m-%d")
@@ -1428,11 +1484,6 @@ JSON Output for Database Logging:
 ```
 - Only include the JSON block if new food is being logged.
 """
-
-fasting_schedule = get_fasting_schedule()
-custom_instructions = get_custom_instructions()
-user_goals = get_user_goals()
-SYSTEM_PROMPT = get_system_prompt(fasting_schedule, user_goals, custom_instructions)
 
 # --- 4. Top Navigation (Custom UI) ---
 
@@ -1901,22 +1952,25 @@ if st.session_state.view_selection == "🍽️ Log":
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 max_retries = 3
-                retry_delay = 2 # initial delay
                 success = False
                 response = None
-                
+
+                # Build context ONCE — today_logs and fresh_prompt are stable for
+                # the duration of this interaction (no meals logged yet, model unchanged).
+                current_stats = {'cals': cals, 'protein': protein, 'density': density}
+                today_logs = get_today_log_for_timeline()
+                fresh_prompt = get_system_prompt(
+                    fasting_schedule, user_goals, custom_instructions,
+                    today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs,
+                )
+
                 # Tier 1: Primary Model with Retry
                 retry_delay_val = 2.0
                 for attempt in range(max_retries):
                     try:
-                        # Refresh session with latest stats for proactive auditing
-                        current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        today_logs = get_today_log_for_timeline()
-                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs)
-                        
                         existing_session = st.session_state.get("chat_session")
                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
-                        
+
                         # Re-initialize session with fresh prompt and existing history
                         st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt, history=existing_history)
 
@@ -1939,18 +1993,13 @@ if st.session_state.view_selection == "🍽️ Log":
                         else:
                             st.error(f"Primary error: {e}")
                             break
-                
+
                 # Tier 2: Secondary Model Fallback
                 if not success:
                     try:
                         existing_session = st.session_state.get("chat_session")
                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
                         st.session_state.current_model = SECONDARY_MODEL
-                        
-                        current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        today_logs = get_today_log_for_timeline()
-                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs)
-                        
                         st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, fresh_prompt, history=existing_history)
                         response = st.session_state.chat_session.send_message(message_content)
                         success = True
@@ -1965,11 +2014,6 @@ if st.session_state.view_selection == "🍽️ Log":
                         existing_session = st.session_state.get("chat_session")
                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
                         st.session_state.current_model = STABLE_MODEL
-                        
-                        current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        today_logs = get_today_log_for_timeline()
-                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs)
-                        
                         st.session_state.chat_session = get_chat_session(STABLE_MODEL, fresh_prompt, history=existing_history)
                         response = st.session_state.chat_session.send_message(message_content)
                         success = True
@@ -1993,42 +2037,47 @@ if st.session_state.view_selection == "🍽️ Log":
                     # Parse and Log Food to Sheet
                     match = re.search(r'```json\n(.*?)\n```', response.text, re.DOTALL)
                     if match:
-                        try:
-                            items_to_log = json.loads(match.group(1))
-                            today_logs_data = get_today_log_for_timeline()
-                            
-                            valid_items_to_log = []
-                            for data in items_to_log:
-                                item_name = data.get("item", "Unknown").strip().lower()
-                                
-                                # Check for duplicates today
-                                is_duplicate = False
-                                for log in today_logs_data:
-                                    if log.get("item", "").strip().lower() == item_name:
-                                        is_duplicate = True
-                                        break
-                                
-                                conf_key = f"confirm_{item_name}"
-                                if is_duplicate and not st.session_state.get(conf_key, False):
-                                    st.session_state[conf_key] = True
-                                    display_text += f"\n\n**⚠️ System Notice:** You already logged '{data.get('item')}' today. Are you logging another one? *(Reply 'yes' to confirm)*"
-                                else:
-                                    valid_items_to_log.append(data)
-                                    if st.session_state.get(conf_key, False):
-                                        st.session_state[conf_key] = False
+                        items_to_log = parse_meal_log(match.group(1))
+                        if items_to_log is None:
+                            st.error("AI response contained an unreadable food-log block. Nothing was logged.")
+                        else:
+                            try:
+                                today_logs_data = today_logs  # reuse the fetch from above
 
-                            for data in valid_items_to_log:
-                                if log_to_sheet(data.get("item", "Unknown"), 
-                                               data.get("calories", 0), 
-                                               data.get("protein", 0), 
-                                               data.get("density", "0%"),
-                                               data.get("emoji", "🍽️")):
-                                    st.toast(f"Logged: {data.get('item')} {data.get('emoji', '🍽️')}")
-                            
-                            if valid_items_to_log:
-                                get_trailing_7_days_data.clear()
-                        except Exception as e:
-                            st.error(f"Logging error: {e}")
+                                valid_items_to_log = []
+                                for data in items_to_log:
+                                    item_name = data.get("item", "Unknown").strip().lower()
+
+                                    # Check for duplicates today
+                                    is_duplicate = False
+                                    for logged in today_logs_data:
+                                        if logged.get("item", "").strip().lower() == item_name:
+                                            is_duplicate = True
+                                            break
+
+                                    conf_key = f"confirm_{item_name}"
+                                    if is_duplicate and not st.session_state.get(conf_key, False):
+                                        st.session_state[conf_key] = True
+                                        display_text += f"\n\n**⚠️ System Notice:** You already logged '{data.get('item')}' today. Are you logging another one? *(Reply 'yes' to confirm)*"
+                                    else:
+                                        valid_items_to_log.append(data)
+                                        if st.session_state.get(conf_key, False):
+                                            st.session_state[conf_key] = False
+
+                                for data in valid_items_to_log:
+                                    if log_to_sheet(
+                                        data.get("item", "Unknown"),
+                                        data.get("calories", 0),
+                                        data.get("protein", 0),
+                                        data.get("density", "0%"),
+                                        data.get("emoji", "🍽️"),
+                                    ):
+                                        st.toast(f"Logged: {data.get('item')} {data.get('emoji', '🍽️')}")
+
+                                if valid_items_to_log:
+                                    get_trailing_7_days_data.clear()
+                            except Exception as e:
+                                st.error(f"Logging error: {e}")
                     
                     # Persistence & Cleanup
                     st.session_state.messages.append({"role": "assistant", "content": display_text})
@@ -2044,7 +2093,11 @@ elif st.session_state.view_selection == "📊 Analyze":
 
     # --- Plan Effectiveness ---
     render_section_header('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-gauge"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>', "Plan Effectiveness")
-    score, msg, drivers = calculate_plan_effectiveness()
+    score, msg, drivers = calculate_plan_effectiveness(
+        pre_goals=user_goals,
+        pre_fasting=fasting_schedule,
+        demo_mode=st.session_state.get("enable_demo", False),
+    )
     if score is not None:
         color = "#00A6FF"
         if score < 5: color = "#dc3545"
