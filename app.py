@@ -142,12 +142,8 @@ st.markdown("""
         gap: 5px !important; /* Tighter 5px gap as requested */
     }
 
-    /* Sticky nav — locks to top when scrolling */
+    /* Nav container — fixed positioning handled via JS in nav iframe */
     div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHtml"]) {
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-        background-color: #0e1117;
         margin-bottom: 0px !important;
         margin-top: 0px !important;
     }
@@ -1618,6 +1614,41 @@ nav_html = f"""
   
   // Bridge is now handled in the main st.markdown block for cleaner scope
 
+  // Pin nav to top of viewport by fixing its container in the parent DOM.
+  // Uses the same cross-window DOM access pattern as switchTab().
+  // Runs immediately and on a short interval to survive Streamlit rerenders.
+  function pinNav() {{
+    try {{
+      const iframe = window.frameElement;
+      if (!iframe) return;
+      let el = iframe;
+      while (el && el.parentElement) {{
+        el = el.parentElement;
+        const p = el.parentElement;
+        if (p && p.getAttribute('data-testid') === 'stVerticalBlock') {{
+          if (el.style.position !== 'fixed') {{
+            el.style.position = 'fixed';
+            el.style.top = '0';
+            el.style.left = '0';
+            el.style.right = '0';
+            el.style.zIndex = '9999';
+            el.style.background = '#0e1117';
+            el.style.padding = '8px';
+            el.style.width = '100vw';
+            el.style.boxSizing = 'border-box';
+            el.style.margin = '0';
+          }}
+          if (p.style.paddingTop !== '88px') {{
+            p.style.paddingTop = '88px';
+          }}
+          return;
+        }}
+      }}
+    }} catch(e) {{}}
+  }}
+  pinNav();
+  setInterval(pinNav, 300);
+
   // Hide the invisible Streamlit buttons in the parent DOM
   setInterval(() => {{
      const buttons = window.parent.document.querySelectorAll('button p');
@@ -1992,7 +2023,7 @@ if st.session_state.view_selection == "🍽️ Log":
 """
 
     st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
-    components.html(_render_chat_history(st.session_state.messages), height=480, scrolling=False)
+    components.html(_render_chat_history(st.session_state.messages), height=380, scrolling=False)
 
     # --- 6. Chat Input Support (Log View Only) ---
     with st.container():
