@@ -1,0 +1,92 @@
+"""Named constants for the RatioTen application.
+
+All magic numbers and configuration values live here so that the scoring
+model is self-documenting and easy to tune without hunting through app code.
+"""
+from zoneinfo import ZoneInfo
+
+# ---------------------------------------------------------------------------
+# Timezone
+# ---------------------------------------------------------------------------
+EASTERN = ZoneInfo("America/New_York")
+
+# ---------------------------------------------------------------------------
+# AI Models
+# ---------------------------------------------------------------------------
+PRIMARY_MODEL = "gemini-3-pro-preview"
+SECONDARY_MODEL = "gemini-2.5-flash"
+STABLE_MODEL = "gemini-2.0-flash"
+
+# ---------------------------------------------------------------------------
+# Scoring: Weight Shift Component (0–5 pts)
+# ---------------------------------------------------------------------------
+WEIGHT_SCORE_MULTIPLIER = 2.9       # Scales lb-loss to points; maps 0–0.9 lb drop → 2.0–4.9 pts
+WEIGHT_SCORE_BASE = 2.0             # Points for any non-negative weight shift (0–0.9 lb loss)
+WEIGHT_LOSS_FULL_THRESHOLD = 1.0    # Lbs lost required for the maximum weight score
+WEIGHT_GAIN_PENALTY_THRESHOLD = 0.5 # Lbs gained before the penalty applies
+WEIGHT_GAIN_PENALTY = 2.0           # Points deducted for excessive weight gain
+WEIGHT_MAX_POINTS = 5.0             # Maximum points from the weight shift component
+
+# ---------------------------------------------------------------------------
+# Scoring: Daily Adherence Points (per day, out of 10)
+# ---------------------------------------------------------------------------
+CALORIE_TARGET_BUFFER = 100         # Extra cals allowed above target for full calorie points
+CALORIE_PARTIAL_BUFFER = 200        # Extra cals above the buffer before partial credit ends
+CAL_FULL_POINTS = 4.0               # Points for staying within calorie target + buffer
+CAL_PARTIAL_POINTS = 2.0            # Points for a slight calorie overage
+PROTEIN_FULL_POINTS = 4.0           # Points for hitting the dynamic protein floor
+PROTEIN_PARTIAL_POINTS = 2.0        # Points for reaching 80 % of the protein floor
+TIMING_FULL_POINTS = 2.0            # Points for all meals within the eating window
+TIMING_BUFFER_HOURS = 1             # Grace-period (hours) around eating-window edges
+ADHERENCE_MAX_POINTS = 5.0          # Maximum points from the adherence component
+
+# ---------------------------------------------------------------------------
+# Scoring: Dynamic Protein Floor
+# ---------------------------------------------------------------------------
+PROTEIN_FLOOR_FULL_HOURS = 6.0      # Eating-window hours at which the full floor applies
+PROTEIN_FLOOR_MIN_HOURS = 1.0       # Below this → minimum protein floor fraction
+PROTEIN_FLOOR_MIN_FRACTION = 0.30   # Minimum protein floor as a fraction of the goal
+
+# ---------------------------------------------------------------------------
+# Scoring: Global
+# ---------------------------------------------------------------------------
+SCORE_MIN = 1.0
+SCORE_MAX = 10.0
+SCORE_WINDOW_DAYS = 14              # Rolling days evaluated for the effectiveness score
+MIN_DAYS_FOR_SCORE = 7              # Minimum logged days required to compute a score
+MIN_WEIGH_INS_FOR_SCORE = 4         # Minimum weigh-ins required in the scoring window
+
+# ---------------------------------------------------------------------------
+# Scoring: Sync Engine
+# ---------------------------------------------------------------------------
+SCORE_BACKFILL_DAYS = 14            # Default backfill range (days before today)
+SCORE_FORCE_BACKFILL_DAYS = 21      # Extended backfill range on force-resync
+SCORE_MAX_DAYS_PER_RUN = 20         # Maximum dates processed per sync run
+SCORE_APPEND_SLEEP = 1.0            # Seconds to sleep between sheet appends (rate-limit guard)
+
+# ---------------------------------------------------------------------------
+# Timeline Layout
+# ---------------------------------------------------------------------------
+TIMELINE_LANE_BASE_OFFSET_PX = 15   # Pixel distance from the bar to the first stagger lane
+TIMELINE_LANE_HEIGHT_PX = 25        # Pixel step added per additional stagger lane
+
+# ---------------------------------------------------------------------------
+# System Prompt Cache
+# ---------------------------------------------------------------------------
+SYSTEM_PROMPT_TTL = 300             # Seconds to cache the system prompt (5 minutes)
+
+# ---------------------------------------------------------------------------
+# Protein Density Target
+# ---------------------------------------------------------------------------
+TARGET_DENSITY = 10.0               # Minimum protein density % goal
+
+# ---------------------------------------------------------------------------
+# Google Sheets
+# ---------------------------------------------------------------------------
+SPREADSHEET_NAME = "Nutrition_Logs"
+WS_CHAT_HISTORY = "Chat_History"
+WS_WEIGHT_LOGS = "Weight_Logs"
+WS_FASTING_SCHEDULE = "Fasting_Schedule"
+WS_USER_GOALS = "User_Goals"
+WS_CUSTOM_INSTRUCTIONS = "Custom_Instructions"
+WS_PLAN_EFFECTIVENESS = "Plan_Effectiveness_Logs"
