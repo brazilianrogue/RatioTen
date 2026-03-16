@@ -1991,6 +1991,7 @@ if st.session_state.view_selection == "🍽️ Log":
 <div id="ch">{inner}</div>
 """
 
+    st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
     components.html(_render_chat_history(st.session_state.messages), height=480, scrolling=False)
 
     # --- 6. Chat Input Support (Log View Only) ---
