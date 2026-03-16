@@ -110,6 +110,18 @@ def get_chat_session(model_id, system_prompt, history=None):
     )
 
 st.markdown("""
+<script>
+(function() {
+    var link = document.createElement('link');
+    link.rel = 'apple-touch-icon';
+    link.sizes = '180x180';
+    link.href = '/app/static/apple-touch-icon.png';
+    document.head.appendChild(link);
+})();
+</script>
+""", unsafe_allow_html=True)
+
+st.markdown("""
 <style>
     /* Hide the Streamlit Header completely */
     header[data-testid="stHeader"], [data-testid="stHeader"] {
