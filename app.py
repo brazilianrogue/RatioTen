@@ -221,8 +221,22 @@ st.markdown("""
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
 
-    /* Inline camera button — compact square, matches chat input row height */
-    div[data-testid="stColumn"]:last-child .stButton button {
+    /* Pull the camera-button column row up to visually overlap the chat input.
+       st.chat_input() escapes its column and renders full-width; the sibling
+       column (camera button) renders below it. Negative margin-top + z-index
+       brings it back up, and pointer-events:none on the empty left column lets
+       taps pass through to the chat input underneath. */
+    div[data-testid="stVerticalBlock"] > div:last-child:has([data-testid="stHorizontalBlock"]) {
+        margin-top: -58px !important;
+        position: relative !important;
+        z-index: 200 !important;
+        pointer-events: none !important;
+    }
+    div[data-testid="stVerticalBlock"] > div:last-child:has([data-testid="stHorizontalBlock"]) [data-testid="stColumn"]:last-child {
+        pointer-events: all !important;
+    }
+    /* Camera icon button style */
+    div[data-testid="stVerticalBlock"] > div:last-child [data-testid="stColumn"]:last-child .stButton button {
         height: 52px !important;
         border-radius: 12px !important;
         font-size: 1.2rem !important;
@@ -1651,8 +1665,8 @@ nav_html = f"""
             el.style.boxSizing = 'border-box';
             el.style.margin = '0';
           }}
-          if (p.style.paddingTop !== '88px') {{
-            p.style.paddingTop = '88px';
+          if (p.style.paddingTop !== '76px') {{
+            p.style.paddingTop = '76px';
           }}
           return;
         }}
@@ -2025,7 +2039,7 @@ if st.session_state.view_selection == "🍽️ Log":
 <style>
   body{{margin:0;background:transparent;
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}}
-  #ch{{height:360px;overflow-y:auto;display:flex;flex-direction:column-reverse;
+  #ch{{height:430px;overflow-y:auto;display:flex;flex-direction:column-reverse;
        padding:8px 4px;background:#0e1117;border-radius:8px;
        scrollbar-width:thin;scrollbar-color:#2a2a2a transparent;}}
   #ch::-webkit-scrollbar{{width:4px;}}
@@ -2036,7 +2050,7 @@ if st.session_state.view_selection == "🍽️ Log":
 """
 
     st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
-    components.html(_render_chat_history(st.session_state.messages), height=380, scrolling=False)
+    components.html(_render_chat_history(st.session_state.messages), height=450, scrolling=False)
 
     # --- 6. Chat Input Support (Log View Only) ---
 
