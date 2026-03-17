@@ -147,13 +147,54 @@ st.markdown("""
         max-width: 100% !important;
     }
 
-    /* Push page content below the fixed 80px nav bar + 4px gap.
-       Hard-coded because Streamlit does not use viewport-fit=cover, so
-       env(safe-area-inset-top) is always 0; the browser positions fixed
-       elements below the notch automatically.
-       Targets only the outermost stVerticalBlock (direct child of block-container). */
+    /* ── NAV: CSS-pinned to viewport top ──────────────────────────────────────
+       The nav wrapper is always the 4th child of the outermost stVerticalBlock
+       (children 1-3 are two st.markdown injections + one PWA height=0 iframe).
+       Using CSS !important here is critical: Streamlit's 1-second timer causes
+       React rerenders that reset JS-applied inline position:fixed back to relative.
+       A stylesheet rule with !important survives React reconciliation. */
+    .block-container > div[data-testid="stVerticalBlock"] > div:nth-child(4) {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100vw !important;
+        z-index: 9999 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        height: auto !important;
+    }
+
+    /* Hide pre-nav zero-height children so they contribute no flex gap */
+    .block-container > div[data-testid="stVerticalBlock"] > div:nth-child(-n+3) {
+        display: none !important;
+    }
+
+    /* Push page content below the 140px nav iframe + 4px gap.
+       calc() uses env(safe-area-inset-top) which IS active on iPhone because
+       Streamlit's WKWebView uses viewport-fit=cover (confirmed: removing it
+       caused nav to overlap the Dynamic Island / status bar icons).
+       Targets only the outermost stVerticalBlock. */
     .block-container > div[data-testid="stVerticalBlock"] {
-        padding-top: 84px !important;
+        padding-top: calc(env(safe-area-inset-top, 0px) + 84px) !important;
+    }
+
+    /* ── INPUT BAR: CSS-pinned to viewport bottom ──────────────────────────
+       Same React-rerender problem as nav. The input bar iframe wrapper is the
+       last stElementContainer before the nav-bridge stLayoutWrapper at the
+       very end of the page. Target it as :nth-last-child(2) so it stays fixed
+       regardless of how many elements precede it. */
+    .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"]:nth-last-child(2) {
+        position: fixed !important;
+        bottom: env(safe-area-inset-bottom, 0px) !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 64px !important;
+        z-index: 999 !important;
+        overflow: visible !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     /* Hide Streamlit's built-in footer to remove blank space at page bottom */
@@ -164,7 +205,7 @@ st.markdown("""
         gap: 5px !important; /* Tighter 5px gap as requested */
     }
 
-    /* Nav container — fixed positioning handled via JS in nav iframe */
+    /* Nav container — margin cleanup */
     div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHtml"]) {
         margin-bottom: 0px !important;
         margin-top: 0px !important;
@@ -1563,11 +1604,10 @@ nav_html = f"""
   body {{
     margin: 0;
     padding: 0;
+    /* Push nav content below iOS Dynamic Island / notch */
+    padding-top: env(safe-area-inset-top, 0px);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    /* No background — iframe is exactly 80px tall to match nav content.
-       Streamlit doesn't use viewport-fit=cover, so the browser already
-       positions fixed elements below the Dynamic Island automatically. */
-    background: transparent;
+    background: #0e1117; /* fills the notch area so it blends with the page */
     overflow: hidden;
   }}
   .nav-bar {{
@@ -1777,7 +1817,7 @@ nav_html = f"""
 </body>
 </html>
 """
-components.html(nav_html, height=80)
+components.html(nav_html, height=140)
 
 # Hidden callback bridge
 def set_view(view):
