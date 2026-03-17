@@ -1977,6 +1977,54 @@ if st.session_state.view_selection == "🍽️ Log":
         import html as _html, re as _re
 
         def md_to_html(text):
+            # --- Pre-pass: extract and convert markdown tables before escaping ---
+            TABLE_PLACEHOLDER = '\x00TABLE\x00'
+            tables = []
+            def _extract_tables(raw):
+                lines = raw.split('\n')
+                result, i = [], 0
+                while i < len(lines):
+                    # A table block: first line has |, second is separator (|---|)
+                    if '|' in lines[i] and i + 1 < len(lines) and _re.match(r'^\s*\|[\s\-:|]+\|', lines[i+1]):
+                        block, j = [], i
+                        while j < len(lines) and '|' in lines[j]:
+                            block.append(lines[j])
+                            j += 1
+                        if len(block) >= 2:
+                            header_cells = [c.strip() for c in block[0].strip().strip('|').split('|')]
+                            # skip separator row (index 1)
+                            data_rows = block[2:]
+                            thead = '<tr>' + ''.join(
+                                f'<th style="padding:5px 8px;text-align:left;font-weight:600;color:#a0a0b0;border-bottom:1px solid rgba(255,255,255,0.1);white-space:nowrap;">'
+                                f'{_html.escape(h)}</th>' for h in header_cells
+                            ) + '</tr>'
+                            tbody = ''
+                            for row in data_rows:
+                                cells = [c.strip() for c in row.strip().strip('|').split('|')]
+                                # pad or trim to header width
+                                while len(cells) < len(header_cells): cells.append('')
+                                cells = cells[:len(header_cells)]
+                                tbody += '<tr>' + ''.join(
+                                    f'<td style="padding:4px 8px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:0.83rem;color:#c8c8d4;">'
+                                    f'{_html.escape(c)}</td>' for c in cells
+                                ) + '</tr>'
+                            table_html = (
+                                '<div style="overflow-x:auto;margin:6px 0;">'
+                                '<table style="border-collapse:collapse;width:100%;min-width:100%;">'
+                                f'<thead>{thead}</thead>'
+                                f'<tbody>{tbody}</tbody>'
+                                '</table></div>'
+                            )
+                            tables.append(table_html)
+                            result.append(TABLE_PLACEHOLDER)
+                            i = j
+                            continue
+                    result.append(lines[i])
+                    i += 1
+                return '\n'.join(result)
+
+            text = _extract_tables(text)
+
             text = _html.escape(text)
             # Bold / italic
             text = _re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
@@ -2001,6 +2049,11 @@ if st.session_state.view_selection == "🍽️ Log":
             text = '\n'.join(out)
             text = _re.sub(r'\n\n+', '</p><p>', text)
             text = text.replace('\n', '<br>')
+            # Restore tables (placeholders were escaped to &#x00;TABLE&#x00; — match both)
+            escaped_ph = _html.escape(TABLE_PLACEHOLDER)
+            for tbl in tables:
+                text = text.replace(escaped_ph, tbl, 1)
+                text = text.replace(TABLE_PLACEHOLDER, tbl, 1)
             return f'<p style="margin:0">{text}</p>'
 
         bubble_rows = []
@@ -2040,6 +2093,8 @@ if st.session_state.view_selection == "🍽️ Log":
   #ch{{height:430px;overflow-y:auto;display:flex;flex-direction:column-reverse;
        padding:8px 4px;background:#0e1117;border-radius:8px;
        scrollbar-width:thin;scrollbar-color:#2a2a2a transparent;}}
+  #ch table{{border-collapse:collapse;width:100%;}}
+  #ch th,#ch td{{text-align:left;vertical-align:top;}}
   #ch::-webkit-scrollbar{{width:4px;}}
   #ch::-webkit-scrollbar-track{{background:transparent;}}
   #ch::-webkit-scrollbar-thumb{{background:#2a2a2a;border-radius:2px;}}
