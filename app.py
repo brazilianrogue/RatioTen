@@ -2173,9 +2173,12 @@ if st.session_state.view_selection == "🍽️ Log":
   <input type="text" class="meal-input" placeholder="Describe your meal..." id="mealInput">
   <button class="cam-btn" id="camBtn">{cam_icon}</button>
 </div>
+<div id="dbg" style="font-size:10px;color:#e8a020;padding:2px 6px;min-height:14px;word-break:break-all;"></div>
 <script>
   const inp = document.getElementById('mealInput');
   const cam = document.getElementById('camBtn');
+  const dbgEl = document.getElementById('dbg');
+  function dbg(msg) {{ if (dbgEl) dbgEl.textContent = msg; }}
 
   // Must use parent window's prototype — el lives in parent DOM, not iframe DOM
   function setReactValue(el, val) {{
@@ -2185,15 +2188,29 @@ if st.session_state.view_selection == "🍽️ Log":
       setter.call(el, val);
       el.dispatchEvent(new Event('input',  {{ bubbles: true }}));
       el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-    }} catch(e) {{}}
+      return true;
+    }} catch(e) {{ dbg('setReact ERR: ' + e.message); return false; }}
   }}
 
   function clickBridge(label) {{
     try {{
+      let n = 0;
       window.parent.document.querySelectorAll('button p').forEach(p => {{
-        if (p.textContent.trim() === label) p.parentElement.click();
+        if (p.textContent.trim() === label) {{ p.parentElement.click(); n++; }}
       }});
-    }} catch(e) {{}}
+      return n;
+    }} catch(e) {{ dbg('clickBridge ERR: ' + e.message); return -1; }}
+  }}
+
+  // Probe the parent DOM and report what's visible — useful for debugging
+  function probe() {{
+    try {{
+      const d = window.parent.document;
+      const bridgeInp = d.querySelector('input[placeholder="__bridge__"]');
+      const sendBtns = [...d.querySelectorAll('button p')].filter(p => p.textContent.trim() === 'H_SEND');
+      const camBtns  = [...d.querySelectorAll('button p')].filter(p => p.textContent.trim() === 'H_CAM');
+      dbg(`probe: bridge=${{bridgeInp ? 'FOUND' : 'NULL'}} H_SEND=${{sendBtns.length}} H_CAM=${{camBtns.length}}`);
+    }} catch(e) {{ dbg('probe ERR: ' + e.message); }}
   }}
 
   // Hide the bridge horizontal block (H_SEND, H_CAM, bridge input) via JS —
@@ -2219,26 +2236,48 @@ if st.session_state.view_selection == "🍽️ Log":
   hideBridgeBlock();
   setInterval(hideBridgeBlock, 300);
 
+  // Run probe every second so the debug line is always fresh
+  probe();
+  setInterval(probe, 1000);
+
   function submitText() {{
     const text = inp.value.trim();
-    if (!text) return;
+    if (!text) {{ dbg('submit: no text'); return; }}
+    dbg('submit: searching bridge input...');
     try {{
-      const hidden = window.parent.document.querySelector('input[placeholder="__bridge__"]');
-      if (hidden) setReactValue(hidden, text);
-    }} catch(e) {{}}
+      const d = window.parent.document;
+      const hidden = d.querySelector('input[placeholder="__bridge__"]');
+      if (hidden) {{
+        const ok = setReactValue(hidden, text);
+        dbg('submit: bridge ' + (ok ? 'value set ✓' : 'setReact failed'));
+      }} else {{
+        dbg('submit: bridge input NOT FOUND — check placeholder');
+      }}
+    }} catch(e) {{ dbg('submit ERR: ' + e.message); }}
     inp.value = '';
-    setTimeout(() => clickBridge('H_SEND'), 120);
+    setTimeout(() => {{
+      const n = clickBridge('H_SEND');
+      dbg('submit: H_SEND clicked=' + n + ' (n<1 means button not found)');
+    }}, 120);
   }}
 
   inp.addEventListener('keydown', e => {{
     if (e.key === 'Enter') {{ e.preventDefault(); submitText(); }}
   }});
 
-  cam.addEventListener('click', () => clickBridge('H_CAM'));
+  cam.addEventListener('click', () => {{
+    const n = clickBridge('H_CAM');
+    dbg('cam: H_CAM clicked=' + n);
+  }});
 </script>
 </body>
 </html>"""
-    components.html(input_iframe_html, height=64, scrolling=False)
+    components.html(input_iframe_html, height=84, scrolling=False)
+
+    # --- DEBUG: show bridge state on every render (remove when submission works) ---
+    _dbg_draft = st.session_state.get("h_meal_draft", "")
+    _dbg_last  = st.session_state.get("_h_meal_last_sent", "")
+    st.caption(f"🔍 h_send={h_send} | h_cam={h_cam} | draft='{_dbg_draft[:30]}' | last='{_dbg_last[:20]}'")
 
     # Handle bridge events
     if h_send:
