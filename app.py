@@ -1674,27 +1674,37 @@ nav_html = f"""
   pinNav();
   setInterval(pinNav, 300);
 
-  // Hide the invisible Streamlit buttons in the parent DOM
-  setInterval(() => {{
-     const buttons = window.parent.document.querySelectorAll('button p');
-     buttons.forEach(p => {{
-         if (p.textContent.includes('H_')) {{
-             // The structure in Streamlit is often button > div > span > p or similar
-             // We go up until we find the stButton container
-             let el = p;
-             while (el && !el.classList.contains('stButton') && el !== window.parent.document.body) {{
-                 el = el.parentElement;
-             }}
-             if (el && el.classList.contains('stButton')) {{
-                 el.style.display = 'none';
-                 el.style.height = '0';
-                 el.style.margin = '0';
-                 el.style.padding = '0';
-                 el.style.visibility = 'hidden';
-             }}
-         }}
-     }});
-  }}, 50);
+  // Hide the nav bridge button row (H_LOG/H_ANALYZE/H_PLAN stHorizontalBlock)
+  // and the chat input bridge button row (H_SEND/H_CAM stHorizontalBlock).
+  // Running from the nav iframe (first to load) means this fires before the
+  // user sees any layout, eliminating the gap between nav and metric cards.
+  function hideBridgeRows() {{
+    try {{
+      const d = window.parent.document;
+      const targets = ['H_LOG', 'H_SEND'];  // one representative per block
+      targets.forEach(label => {{
+        d.querySelectorAll('button p').forEach(p => {{
+          if (p.textContent.trim() !== label) return;
+          let el = p;
+          while (el && el !== d.body) {{
+            if (el.dataset && el.dataset.testid === 'stHorizontalBlock') {{
+              [el, el.parentElement].filter(Boolean).forEach(t => {{
+                t.style.display  = 'none';
+                t.style.height   = '0';
+                t.style.margin   = '0';
+                t.style.padding  = '0';
+                t.style.overflow = 'hidden';
+              }});
+              break;
+            }}
+            el = el.parentElement;
+          }}
+        }});
+      }});
+    }} catch(e) {{}}
+  }}
+  hideBridgeRows();
+  setInterval(hideBridgeRows, 300);
 </script>
 </head>
 <body>
@@ -1796,10 +1806,17 @@ def show_effectiveness_modal():
 # No more duplicate CSS block here
 
 
-with st.container():
-    if st.button("H_LOG", on_click=set_view, args=("🍽️ Log",)): pass
-    if st.button("H_ANALYZE", on_click=set_view, args=("📊 Analyze",)): pass
-    if st.button("H_PLAN", on_click=set_view, args=("⚙️ Plan",)): pass
+# Nav bridge buttons — all three in ONE columns row so they produce a single
+# stHorizontalBlock wrapper div that collapses to zero height cleanly.
+# Previously 3 separate stButton wrappers each had residual height on first
+# render (before CSS applied), causing the ~90px nav-to-cards gap.
+_nav_cols = st.columns([1, 1, 1])
+with _nav_cols[0]:
+    st.button("H_LOG",     on_click=set_view, args=("🍽️ Log",))
+with _nav_cols[1]:
+    st.button("H_ANALYZE", on_click=set_view, args=("📊 Analyze",))
+with _nav_cols[2]:
+    st.button("H_PLAN",    on_click=set_view, args=("⚙️ Plan",))
 
 
 # --- 4.5 Modals & Tools ---
@@ -2169,12 +2186,10 @@ if st.session_state.view_selection == "🍽️ Log":
   <input type="text" class="meal-input" placeholder="Describe your meal..." id="mealInput">
   <button class="cam-btn" id="camBtn">{cam_icon}</button>
 </div>
-<div id="dbg" style="font-size:10px;color:#e8a020;padding:2px 6px;min-height:14px;word-break:break-all;"></div>
 <script>
   const inp = document.getElementById('mealInput');
   const cam = document.getElementById('camBtn');
-  const dbgEl = document.getElementById('dbg');
-  function dbg(msg) {{ if (dbgEl) dbgEl.textContent = msg; }}
+  function dbg(msg) {{ /* debug removed */ }}
 
   function clickBridge(label) {{
     try {{
@@ -2186,16 +2201,6 @@ if st.session_state.view_selection == "🍽️ Log":
     }} catch(e) {{ dbg('clickBridge ERR: ' + e.message); return -1; }}
   }}
 
-  // Probe: confirm H_SEND / H_CAM buttons exist in parent DOM
-  function probe() {{
-    try {{
-      const btns = window.parent.document.querySelectorAll('button p');
-      const ns = [...btns].filter(p => p.textContent.trim() === 'H_SEND').length;
-      const nc = [...btns].filter(p => p.textContent.trim() === 'H_CAM').length;
-      const url = window.parent.location.search;
-      dbg(`probe: H_SEND=${{ns}} H_CAM=${{nc}} url=${{url.substring(0,40)}}`);
-    }} catch(e) {{ dbg('probe ERR: ' + e.message); }}
-  }}
 
   // Hide the bridge button block (H_SEND / H_CAM stHorizontalBlock) via JS
   function hideBridgeBlock() {{
@@ -2221,8 +2226,6 @@ if st.session_state.view_selection == "🍽️ Log":
   }}
   hideBridgeBlock();
   setInterval(hideBridgeBlock, 300);
-  probe();
-  setInterval(probe, 1000);
 
   function submitText() {{
     const text = inp.value.trim();
@@ -2261,12 +2264,8 @@ if st.session_state.view_selection == "🍽️ Log":
 </script>
 </body>
 </html>"""
-    components.html(input_iframe_html, height=84, scrolling=False)
+    components.html(input_iframe_html, height=64, scrolling=False)
 
-    # --- DEBUG: show bridge state on every render (remove when submission works) ---
-    _dbg_qp   = st.query_params.get("_rt_meal", "")
-    _dbg_last = st.session_state.get("_h_meal_last_sent", "")
-    st.caption(f"🔍 h_send={h_send} | h_cam={h_cam} | qparam='{_dbg_qp[:30]}' | last='{_dbg_last[:20]}'")
 
     # Handle bridge events — text arrives via URL query param _rt_meal
     if h_send:
