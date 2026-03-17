@@ -2122,12 +2122,14 @@ if st.session_state.view_selection == "🍽️ Log":
   const inp = document.getElementById('mealInput');
   const cam = document.getElementById('camBtn');
 
+  // Must use parent window's prototype — el lives in parent DOM, not iframe DOM
   function setReactValue(el, val) {{
     try {{
       const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype, 'value').set;
+        window.parent.HTMLInputElement.prototype, 'value').set;
       setter.call(el, val);
-      el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+      el.dispatchEvent(new Event('input',  {{ bubbles: true }}));
+      el.dispatchEvent(new Event('change', {{ bubbles: true }}));
     }} catch(e) {{}}
   }}
 
@@ -2139,15 +2141,38 @@ if st.session_state.view_selection == "🍽️ Log":
     }} catch(e) {{}}
   }}
 
+  // Hide the bridge horizontal block (H_SEND, H_CAM, bridge input) via JS —
+  // CSS :has()/:contains() has timing issues on first render.
+  function hideBridgeBlock() {{
+    try {{
+      const d = window.parent.document;
+      d.querySelectorAll('button p').forEach(p => {{
+        if (p.textContent.trim() !== 'H_SEND') return;
+        let el = p;
+        while (el && el !== d.body) {{
+          if (el.dataset && el.dataset.testid === 'stHorizontalBlock') {{
+            const hide = 'display:none!important;height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;';
+            el.style.cssText = hide;
+            if (el.parentElement) el.parentElement.style.cssText = hide;
+            break;
+          }}
+          el = el.parentElement;
+        }}
+      }});
+    }} catch(e) {{}}
+  }}
+  hideBridgeBlock();
+  setInterval(hideBridgeBlock, 300);
+
   function submitText() {{
     const text = inp.value.trim();
     if (!text) return;
     try {{
       const hidden = window.parent.document.querySelector('input[placeholder="__bridge__"]');
-      if (hidden) {{ setReactValue(hidden, text); }}
+      if (hidden) setReactValue(hidden, text);
     }} catch(e) {{}}
     inp.value = '';
-    setTimeout(() => clickBridge('H_SEND'), 80);
+    setTimeout(() => clickBridge('H_SEND'), 120);
   }}
 
   inp.addEventListener('keydown', e => {{
