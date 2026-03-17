@@ -2255,16 +2255,17 @@ if st.session_state.view_selection == "🍽️ Log":
       // fixed iframe doesn't create a gap / blank space at its original position.
       let el = frame.parentElement;
       while (el && el !== window.parent.document.body) {{
+        // Check BEFORE modifying: never collapse a stVerticalBlock because
+        // that wrapper contains all of the view's content (metric cards,
+        // chat history, etc.) — collapsing it hides the entire Log view.
+        if (el.dataset && el.dataset.testid === 'stVerticalBlock') break;
         if (el.style.height !== '0px') {{
-          el.style.height   = '0px';
+          el.style.height    = '0px';
           el.style.minHeight = '0px';
           el.style.overflow  = 'hidden';
           el.style.padding   = '0';
           el.style.margin    = '0';
         }}
-        // Stop once we reach a stHorizontalBlock ancestor (the bridge btn row
-        // siblings live there and we must not collapse their shared container).
-        if (el.dataset && el.dataset.testid === 'stVerticalBlock') break;
         el = el.parentElement;
       }}
       // Ensure page content isn't hidden under the fixed bar.
