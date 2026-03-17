@@ -140,6 +140,9 @@ st.markdown("""
         max-width: 100% !important;
     }
 
+    /* Hide Streamlit's built-in footer to remove blank space at page bottom */
+    footer, [data-testid="stStatusWidget"], #MainMenu { display: none !important; }
+
     /* Target the gaps between blocks */
     div[data-testid="stVerticalBlock"] {
         gap: 5px !important; /* Tighter 5px gap as requested */
@@ -1813,19 +1816,6 @@ def show_effectiveness_modal():
 # No more duplicate CSS block here
 
 
-# Nav bridge buttons — all three in ONE columns row so they produce a single
-# stHorizontalBlock wrapper div that collapses to zero height cleanly.
-# Previously 3 separate stButton wrappers each had residual height on first
-# render (before CSS applied), causing the ~90px nav-to-cards gap.
-_nav_cols = st.columns([1, 1, 1])
-with _nav_cols[0]:
-    st.button("H_LOG",     on_click=set_view, args=("🍽️ Log",))
-with _nav_cols[1]:
-    st.button("H_ANALYZE", on_click=set_view, args=("📊 Analyze",))
-with _nav_cols[2]:
-    st.button("H_PLAN",    on_click=set_view, args=("⚙️ Plan",))
-
-
 # --- 4.5 Modals & Tools ---
 if "enable_demo" not in st.session_state:
     st.session_state.enable_demo = False
@@ -2172,7 +2162,6 @@ if st.session_state.view_selection == "🍽️ Log":
   body {{
     background: #0e1117; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
   }}
   .row {{ display: flex; gap: 8px; align-items: center; padding: 4px 2px; }}
   .meal-input {{
@@ -2243,9 +2232,19 @@ if st.session_state.view_selection == "🍽️ Log":
     try {{
       const frame = window.frameElement;
       if (!frame) return;
-      // Fix the iframe itself to the bottom edge of the viewport
+      // Measure safe-area-inset-bottom from parent document so the bar
+      // sits above the iPhone home-bar indicator with no dead space below.
+      let safeBottom = 0;
+      try {{
+        const probe = window.parent.document.createElement('div');
+        probe.style.cssText = 'position:fixed;bottom:0;height:env(safe-area-inset-bottom,0px);' +
+                              'width:0;pointer-events:none;visibility:hidden';
+        window.parent.document.body.appendChild(probe);
+        safeBottom = probe.getBoundingClientRect().height || 0;
+        probe.remove();
+      }} catch(e) {{}}
       frame.style.position = 'fixed';
-      frame.style.bottom   = '0';
+      frame.style.bottom   = safeBottom + 'px';
       frame.style.left     = '0';
       frame.style.width    = '100%';
       frame.style.height   = '64px';
@@ -2273,7 +2272,7 @@ if st.session_state.view_selection == "🍽️ Log":
         const root = window.parent.document.querySelector('[data-testid="stAppViewBlockContainer"]')
                   || window.parent.document.querySelector('[data-testid="stVerticalBlock"]');
         if (root && !root._rtPadded) {{
-          root.style.paddingBottom = '80px';
+          root.style.paddingBottom = '68px';
           root._rtPadded = true;
         }}
       }} catch(e) {{}}
@@ -2810,3 +2809,15 @@ elif st.session_state.view_selection == "⚙️ Plan":
 
 
     # End of view-specific content
+
+# Nav bridge buttons — rendered at the very END of the page so that any
+# brief flash before JS hides them happens far below the viewport, never
+# between the nav bar and the metric cards.  The set_view callbacks work
+# identically regardless of where in the page the buttons appear.
+_nav_cols = st.columns([1, 1, 1])
+with _nav_cols[0]:
+    st.button("H_LOG",     on_click=set_view, args=("🍽️ Log",))
+with _nav_cols[1]:
+    st.button("H_ANALYZE", on_click=set_view, args=("📊 Analyze",))
+with _nav_cols[2]:
+    st.button("H_PLAN",    on_click=set_view, args=("⚙️ Plan",))
