@@ -1705,6 +1705,13 @@ nav_html = f"""
   }}
   hideBridgeRows();
   setInterval(hideBridgeRows, 300);
+  // MutationObserver: fires synchronously as Streamlit adds nodes to the DOM,
+  // hiding bridge rows before the browser ever paints them.
+  // This is the primary fix for the nav-to-cards gap on initial load.
+  try {{
+    const _obs = new MutationObserver(hideBridgeRows);
+    _obs.observe(window.parent.document.body, {{ childList: true, subtree: true }});
+  }} catch(e) {{}}
 </script>
 </head>
 <body>
@@ -2162,8 +2169,11 @@ if st.session_state.view_selection == "🍽️ Log":
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ background: transparent; overflow: hidden;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+  body {{
+    background: #0e1117; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }}
   .row {{ display: flex; gap: 8px; align-items: center; padding: 4px 2px; }}
   .meal-input {{
     flex: 1; background: #1e2029;
@@ -2226,6 +2236,50 @@ if st.session_state.view_selection == "🍽️ Log":
   }}
   hideBridgeBlock();
   setInterval(hideBridgeBlock, 300);
+
+  // Pin this iframe to the bottom of the viewport so it stays visible
+  // regardless of scroll position (mirrors how st.chat_input behaves).
+  function pinInputBar() {{
+    try {{
+      const frame = window.frameElement;
+      if (!frame) return;
+      // Fix the iframe itself to the bottom edge of the viewport
+      frame.style.position = 'fixed';
+      frame.style.bottom   = '0';
+      frame.style.left     = '0';
+      frame.style.width    = '100%';
+      frame.style.height   = '64px';
+      frame.style.zIndex   = '999';
+      frame.style.border   = 'none';
+      // Collapse every wrapper div in the normal-flow layout so the
+      // fixed iframe doesn't create a gap / blank space at its original position.
+      let el = frame.parentElement;
+      while (el && el !== window.parent.document.body) {{
+        if (el.style.height !== '0px') {{
+          el.style.height   = '0px';
+          el.style.minHeight = '0px';
+          el.style.overflow  = 'hidden';
+          el.style.padding   = '0';
+          el.style.margin    = '0';
+        }}
+        // Stop once we reach a stHorizontalBlock ancestor (the bridge btn row
+        // siblings live there and we must not collapse their shared container).
+        if (el.dataset && el.dataset.testid === 'stVerticalBlock') break;
+        el = el.parentElement;
+      }}
+      // Ensure page content isn't hidden under the fixed bar.
+      try {{
+        const root = window.parent.document.querySelector('[data-testid="stAppViewBlockContainer"]')
+                  || window.parent.document.querySelector('[data-testid="stVerticalBlock"]');
+        if (root && !root._rtPadded) {{
+          root.style.paddingBottom = '80px';
+          root._rtPadded = true;
+        }}
+      }} catch(e) {{}}
+    }} catch(e) {{}}
+  }}
+  pinInputBar();
+  setInterval(pinInputBar, 500);
 
   function submitText() {{
     const text = inp.value.trim();
