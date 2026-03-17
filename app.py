@@ -221,13 +221,20 @@ st.markdown("""
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
 
-    /* Hide H_ bridge text input */
-    div[data-testid="stTextInput"]:has(input[placeholder="__bridge__"]) {
+    /* Hide the bridge widget row (H_SEND, H_CAM, bridge text input) */
+    div[data-testid="stHorizontalBlock"]:has(button p:contains("H_SEND")) {
         display: none !important;
         height: 0 !important;
-        overflow: hidden !important;
         margin: 0 !important;
         padding: 0 !important;
+        overflow: hidden !important;
+    }
+    div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHorizontalBlock"] button p:contains("H_SEND")) {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
     }
 
     /* Hide avatars on native st.chat_message (used for live exchange only) */
@@ -2067,13 +2074,18 @@ if st.session_state.view_selection == "🍽️ Log":
     # tested (chat_input, form_submit_button, regular button). The iframe
     # approach (same as nav) guarantees layout control.
 
-    # Bridge widgets rendered in Streamlit DOM (hidden via CSS)
-    h_send = st.button("H_SEND", key="h_send_bridge")
-    h_cam  = st.button("H_CAM",  key="h_cam_bridge")
-    h_meal_draft = st.text_input(
-        "bridge", placeholder="__bridge__",
-        key="h_meal_draft", label_visibility="collapsed"
-    )
+    # Bridge widgets — grouped in one columns row so they collapse to a single
+    # stHorizontalBlock that CSS can target and hide as one unit.
+    _bc = st.columns([1, 1, 1])
+    with _bc[0]:
+        h_send = st.button("H_SEND", key="h_send_bridge")
+    with _bc[1]:
+        h_cam = st.button("H_CAM", key="h_cam_bridge")
+    with _bc[2]:
+        h_meal_draft = st.text_input(
+            "bridge", placeholder="__bridge__",
+            key="h_meal_draft", label_visibility="collapsed"
+        )
 
     cam_icon = "✕" if st.session_state.pending_image else "📷"
     input_iframe_html = f"""<!DOCTYPE html>
@@ -2151,8 +2163,13 @@ if st.session_state.view_selection == "🍽️ Log":
     # Handle bridge events
     if h_send:
         raw = st.session_state.get("h_meal_draft", "").strip()
-        st.session_state.h_meal_draft = ""
-        user_input = raw if raw else None
+        # Guard against double-submission: skip if same text was already processed
+        last = st.session_state.get("_h_meal_last_sent", "")
+        if raw and raw != last:
+            st.session_state._h_meal_last_sent = raw
+            user_input = raw
+        else:
+            user_input = None
     elif h_cam:
         if st.session_state.pending_image:
             st.session_state.pending_image = None
