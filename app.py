@@ -221,7 +221,7 @@ st.markdown("""
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
 
-    /* Hide the bridge widget row (H_SEND, H_CAM, bridge text input) */
+    /* Hide the bridge button row (H_SEND, H_CAM) — JS also hides via hideBridgeBlock() */
     div[data-testid="stHorizontalBlock"]:has(button p:contains("H_SEND")) {
         display: none !important;
         height: 0 !important;
@@ -235,6 +235,18 @@ st.markdown("""
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
+    }
+    /* Bridge text_input — hidden OFFSCREEN (not display:none) so React keeps tracking
+       its value and includes it in the widget state sent with each button click. */
+    div[data-testid="stVerticalBlock"] > div:has(input[placeholder="__bridge__"]) {
+        position: absolute !important;
+        left: -9999px !important;
+        top: 0 !important;
+        width: 1px !important;
+        height: 1px !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
     }
 
     /* Hide avatars on native st.chat_message (used for live exchange only) */
@@ -2129,18 +2141,22 @@ if st.session_state.view_selection == "🍽️ Log":
     # tested (chat_input, form_submit_button, regular button). The iframe
     # approach (same as nav) guarantees layout control.
 
-    # Bridge widgets — grouped in one columns row so they collapse to a single
-    # stHorizontalBlock that CSS can target and hide as one unit.
-    _bc = st.columns([1, 1, 1])
+    # Bridge widgets — buttons in one columns row (JS hides that stHorizontalBlock).
+    # CRITICAL: bridge text_input must be OUTSIDE the hidden block — Streamlit's React
+    # does not capture widget values from inside display:none containers, so h_send
+    # would always receive draft='' if the input is inside the hidden block.
+    # The text_input is hidden via CSS offscreen positioning (not display:none)
+    # so React continues to track and report its value with each button click.
+    _bc = st.columns([1, 1])
     with _bc[0]:
         h_send = st.button("H_SEND", key="h_send_bridge")
     with _bc[1]:
         h_cam = st.button("H_CAM", key="h_cam_bridge")
-    with _bc[2]:
-        h_meal_draft = st.text_input(
-            "bridge", placeholder="__bridge__",
-            key="h_meal_draft", label_visibility="collapsed"
-        )
+    # Separate row — hidden offscreen via CSS, stays in React's live state
+    h_meal_draft = st.text_input(
+        "bridge", placeholder="__bridge__",
+        key="h_meal_draft", label_visibility="collapsed"
+    )
 
     cam_icon = "✕" if st.session_state.pending_image else "📷"
     input_iframe_html = f"""<!DOCTYPE html>
@@ -2213,8 +2229,10 @@ if st.session_state.view_selection == "🍽️ Log":
     }} catch(e) {{ dbg('probe ERR: ' + e.message); }}
   }}
 
-  // Hide the bridge horizontal block (H_SEND, H_CAM, bridge input) via JS —
-  // CSS :has()/:contains() has timing issues on first render.
+  // Hide the bridge button block (H_SEND / H_CAM stHorizontalBlock) via JS —
+  // CSS :has()/:contains() has first-render timing issues.
+  // NOTE: bridge text_input is NOT in this block (it's a separate row hidden
+  // via CSS offscreen positioning so React keeps tracking its value).
   function hideBridgeBlock() {{
     try {{
       const d = window.parent.document;
@@ -2223,9 +2241,16 @@ if st.session_state.view_selection == "🍽️ Log":
         let el = p;
         while (el && el !== d.body) {{
           if (el.dataset && el.dataset.testid === 'stHorizontalBlock') {{
-            const hide = 'display:none!important;height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;';
-            el.style.cssText = hide;
-            if (el.parentElement) el.parentElement.style.cssText = hide;
+            // Set individual properties — don't use cssText overwrite which
+            // could clobber flex layout styles React needs internally.
+            const targets = [el, el.parentElement].filter(Boolean);
+            targets.forEach(t => {{
+              t.style.display   = 'none';
+              t.style.height    = '0';
+              t.style.margin    = '0';
+              t.style.padding   = '0';
+              t.style.overflow  = 'hidden';
+            }});
             break;
           }}
           el = el.parentElement;
@@ -2261,11 +2286,21 @@ if st.session_state.view_selection == "🍽️ Log":
     }}, 120);
   }}
 
+  // Restore any draft the user had typed before the camera rerun erased the iframe
+  try {{
+    const saved = window.parent.sessionStorage.getItem('_rt_meal_draft');
+    if (saved) {{ inp.value = saved; window.parent.sessionStorage.removeItem('_rt_meal_draft'); }}
+  }} catch(e) {{}}
+
   inp.addEventListener('keydown', e => {{
     if (e.key === 'Enter') {{ e.preventDefault(); submitText(); }}
   }});
 
   cam.addEventListener('click', () => {{
+    // Preserve typed text across the Streamlit rerun triggered by H_CAM
+    try {{
+      if (inp.value.trim()) window.parent.sessionStorage.setItem('_rt_meal_draft', inp.value);
+    }} catch(e) {{}}
     const n = clickBridge('H_CAM');
     dbg('cam: H_CAM clicked=' + n);
   }});
