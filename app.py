@@ -221,17 +221,8 @@ st.markdown("""
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
 
-    /* Chat form styling */
-    [data-testid="stForm"] {
-        background: transparent !important;
-        border: none !important;
-        padding: 0 !important;
-    }
-    [data-testid="stForm"] [data-testid="stHorizontalBlock"] {
-        gap: 6px !important;
-        align-items: flex-end !important;
-    }
-    [data-testid="stForm"] input[type="text"] {
+    /* Chat input row styling */
+    div[data-testid="stTextInput"] input {
         background-color: #1e2029 !important;
         border: 1px solid rgba(255,255,255,0.12) !important;
         border-radius: 24px !important;
@@ -240,7 +231,8 @@ st.markdown("""
         font-size: 1rem !important;
         height: 52px !important;
     }
-    [data-testid="stForm"] [data-testid="stFormSubmitButton"] button {
+    /* Camera button */
+    div[data-testid="stHorizontalBlock"]:has(div[data-testid="stTextInput"]) [data-testid="stBaseButton-secondary"] button {
         height: 52px !important;
         border-radius: 50% !important;
         font-size: 1.2rem !important;
@@ -250,11 +242,6 @@ st.markdown("""
         width: 100% !important;
         min-width: 0 !important;
     }
-    /* Debug colorization — remove when done */
-    [data-section="debug-nav"] { outline: 2px solid rgba(255,80,80,0.6) !important; }
-    [data-section="debug-cards"] { outline: 2px solid rgba(80,255,80,0.6) !important; }
-    [data-section="debug-chat"] { outline: 2px solid rgba(80,160,255,0.6) !important; }
-    [data-section="debug-input"] { outline: 2px solid rgba(255,220,0,0.6) !important; }
 
     /* Hide avatars on native st.chat_message (used for live exchange only) */
     [data-testid="stChatMessageAvatarUser"],
@@ -1834,7 +1821,6 @@ if st.session_state.view_selection == "🍽️ Log":
     lowest_w = get_lowest_weight()
 
     dashboard_html = f"""
-    <div style="outline:2px solid rgba(80,255,80,0.6);padding:2px;"><!-- DEBUG:cards -->
     <div class="metric-container">
         <div class="metric-card" style="border: 1px solid #00A6FF;">
             <div class="metric-label">Status</div>
@@ -1847,7 +1833,6 @@ if st.session_state.view_selection == "🍽️ Log":
             <div class="metric-delta delta-green">lbs</div>
         </div>
     </div>
-    </div><!-- /DEBUG:cards -->
     """
     st.markdown(dashboard_html, unsafe_allow_html=True)
 
@@ -1903,7 +1888,6 @@ if st.session_state.view_selection == "🍽️ Log":
 
     # Metric Row (Daily Targets)
     metric_html = f"""
-    <div style="outline:2px solid rgba(80,255,80,0.6);padding:2px;"><!-- DEBUG:metric -->
     <div class="metric-container">
         <div class="metric-card">
             <div class="metric-label">Calories</div>
@@ -1925,7 +1909,6 @@ if st.session_state.view_selection == "🍽️ Log":
             <div class="metric-delta delta-green">Target: 10%</div>
         </div>
     </div>
-    </div><!-- /DEBUG:metric -->
     """
     st.markdown(metric_html, unsafe_allow_html=True)
     
@@ -2062,7 +2045,6 @@ if st.session_state.view_selection == "🍽️ Log":
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}}
   #ch{{height:430px;overflow-y:auto;display:flex;flex-direction:column-reverse;
        padding:8px 4px;background:#0e1117;border-radius:8px;
-       outline:2px solid rgba(80,160,255,0.6);
        scrollbar-width:thin;scrollbar-color:#2a2a2a transparent;}}
   #ch::-webkit-scrollbar{{width:4px;}}
   #ch::-webkit-scrollbar-track{{background:transparent;}}
@@ -2093,22 +2075,24 @@ if st.session_state.view_selection == "🍽️ Log":
             unsafe_allow_html=True
         )
 
-    # Chat input form — st.form() respects column layout unlike st.chat_input()
-    st.markdown('<div data-section="debug-input">', unsafe_allow_html=True)
-    with st.form("chat_form", clear_on_submit=True):
-        col_text, col_send, col_cam = st.columns([8, 1, 1])
-        with col_text:
-            user_input_text = st.text_input(
-                "meal_input",
-                placeholder="Describe your meal...",
-                label_visibility="collapsed"
-            )
-        with col_send:
-            submitted = st.form_submit_button("↑", use_container_width=True)
-        with col_cam:
-            cam_label = "✕" if st.session_state.pending_image else "📷"
-            cam_pressed = st.form_submit_button(cam_label, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Chat input — plain st.text_input + st.button stay inside columns,
+    # unlike st.form_submit_button which escapes its column container.
+    # Enter key in text_input triggers a rerun; we guard against accidental
+    # submission when the camera button is tapped by checking cam_pressed.
+    if "meal_input_gen" not in st.session_state:
+        st.session_state.meal_input_gen = 0
+
+    col_text, col_cam = st.columns([9, 1])
+    with col_text:
+        typed = st.text_input(
+            "meal_input",
+            placeholder="Describe your meal...",
+            label_visibility="collapsed",
+            key=f"meal_text_{st.session_state.meal_input_gen}"
+        )
+    with col_cam:
+        cam_label = "✕" if st.session_state.pending_image else "📷"
+        cam_pressed = st.button(cam_label, key="cam_inline", use_container_width=True)
 
     if cam_pressed:
         if st.session_state.pending_image:
@@ -2117,7 +2101,10 @@ if st.session_state.view_selection == "🍽️ Log":
             st.session_state.show_camera = not st.session_state.show_camera
         st.rerun()
 
-    user_input = user_input_text if submitted else None
+    # Only process text if cam wasn't clicked (avoids blur-on-camera-tap issue)
+    user_input = typed.strip() if typed and typed.strip() and not cam_pressed else None
+    if user_input:
+        st.session_state.meal_input_gen += 1  # clears the input widget on next render
 
     if user_input:
         # 1. Prepare segments for UI and Gemini
