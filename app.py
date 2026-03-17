@@ -139,11 +139,20 @@ st.markdown("""
     /* Reduce the default Streamlit padding for better use of space */
     .block-container {
         padding-top: 1px !important;
-        padding-bottom: 0rem !important;
+        /* Bottom clearance for fixed input bar: 64px bar + device home-bar safe area */
+        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 68px) !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
         margin-top: 0px !important;
         max-width: 100% !important;
+    }
+
+    /* Push page content below the fixed nav bar.
+       calc() uses the device safe-area-inset-top so this is correct on
+       every device (desktop safe-area=0 → 80px; iPhone 17 Pro Max ≈ 59px → 139px).
+       Targets only the outermost stVerticalBlock (direct child of block-container). */
+    .block-container > div[data-testid="stVerticalBlock"] {
+        padding-top: calc(env(safe-area-inset-top, 0px) + 80px) !important;
     }
 
     /* Hide Streamlit's built-in footer to remove blank space at page bottom */
@@ -1670,8 +1679,10 @@ nav_html = f"""
             el.style.overflow = 'visible';
             el.style.boxSizing = 'border-box';
           }}
+          // paddingTop is handled by CSS calc(env(safe-area-inset-top)+80px).
+          // JS must NOT override it — leave inline style unset so CSS wins.
           // Hide zero-height pre-nav flex siblings so they contribute no
-          // flex gap and no visible space between nav and first card.
+          // flex gap that would add extra space below the nav bar.
           for (const child of p.children) {{
             if (child === el) break;
             const pos = getComputedStyle(child).position;
@@ -1679,15 +1690,6 @@ nav_html = f"""
               child.style.display = 'none';
             }}
           }}
-          // Compute paddingTop from ACTUAL bounding rects so the
-          // calculation is device-aware (works with any safe-area inset).
-          // navBottom = bottom edge of nav iframe in the viewport.
-          // vbTop = top edge of stVerticalBlock in the viewport.
-          // With pre-nav items hidden there are no extra flex gaps to subtract.
-          const navBottom = iframe.getBoundingClientRect().bottom || (iframe.offsetHeight || 140);
-          const vbTop = p.getBoundingClientRect().top || 0;
-          const want = Math.max(0, navBottom - vbTop + 4) + 'px';
-          if (p.style.paddingTop !== want) p.style.paddingTop = want;
           return;
         }}
       }}
@@ -2251,19 +2253,10 @@ if st.session_state.view_selection == "🍽️ Log":
     try {{
       const frame = window.frameElement;
       if (!frame) return;
-      // Measure safe-area-inset-bottom from parent document so the bar
-      // sits above the iPhone home-bar indicator with no dead space below.
-      let safeBottom = 0;
-      try {{
-        const probe = window.parent.document.createElement('div');
-        probe.style.cssText = 'position:fixed;bottom:0;height:env(safe-area-inset-bottom,0px);' +
-                              'width:0;pointer-events:none;visibility:hidden';
-        window.parent.document.body.appendChild(probe);
-        safeBottom = probe.getBoundingClientRect().height || 0;
-        probe.remove();
-      }} catch(e) {{}}
+      // Pin bar above the home-bar indicator. CSS env() in inline styles is
+      // supported on iOS Safari — no JS probe needed.
       frame.style.position = 'fixed';
-      frame.style.bottom   = safeBottom + 'px';
+      frame.style.bottom   = 'env(safe-area-inset-bottom, 0px)';
       frame.style.left     = '0';
       frame.style.width    = '100%';
       frame.style.height   = '64px';
@@ -2286,16 +2279,6 @@ if st.session_state.view_selection == "🍽️ Log":
         }}
         el = el.parentElement;
       }}
-      // Ensure page content isn't hidden under the fixed bar.
-      // Account for safeBottom so content clears the bar even when it
-      // sits above the iPhone home-bar region.
-      try {{
-        const root = window.parent.document.querySelector('[data-testid="stAppViewBlockContainer"]')
-                  || window.parent.document.querySelector('[data-testid="stVerticalBlock"]');
-        if (root) {{
-          root.style.paddingBottom = (safeBottom + 68) + 'px';
-        }}
-      }} catch(e) {{}}
     }} catch(e) {{}}
   }}
   pinInputBar();
