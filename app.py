@@ -147,12 +147,13 @@ st.markdown("""
         max-width: 100% !important;
     }
 
-    /* Push page content below the fixed nav bar.
-       calc() uses the device safe-area-inset-top so this is correct on
-       every device (desktop safe-area=0 → 80px; iPhone 17 Pro Max ≈ 59px → 139px).
+    /* Push page content below the fixed 80px nav bar + 4px gap.
+       Hard-coded because Streamlit does not use viewport-fit=cover, so
+       env(safe-area-inset-top) is always 0; the browser positions fixed
+       elements below the notch automatically.
        Targets only the outermost stVerticalBlock (direct child of block-container). */
     .block-container > div[data-testid="stVerticalBlock"] {
-        padding-top: calc(env(safe-area-inset-top, 0px) + 80px) !important;
+        padding-top: 84px !important;
     }
 
     /* Hide Streamlit's built-in footer to remove blank space at page bottom */
@@ -1562,10 +1563,12 @@ nav_html = f"""
   body {{
     margin: 0;
     padding: 0;
-    /* Push nav bar below iOS Dynamic Island / notch via CSS env() */
-    padding-top: env(safe-area-inset-top, 0px);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #0e1117; /* match page so safe-area zone blends seamlessly */
+    /* No background — iframe is exactly 80px tall to match nav content.
+       Streamlit doesn't use viewport-fit=cover, so the browser already
+       positions fixed elements below the Dynamic Island automatically. */
+    background: transparent;
+    overflow: hidden;
   }}
   .nav-bar {{
     display: flex;
@@ -1774,7 +1777,7 @@ nav_html = f"""
 </body>
 </html>
 """
-components.html(nav_html, height=140)
+components.html(nav_html, height=80)
 
 # Hidden callback bridge
 def set_view(view):
