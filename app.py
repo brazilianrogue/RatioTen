@@ -221,26 +221,13 @@ st.markdown("""
     .delta-green { background-color: rgba(0, 166, 255, 0.2); color: #00A6FF; }
     .delta-red { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
 
-    /* Chat input row styling */
-    div[data-testid="stTextInput"] input {
-        background-color: #1e2029 !important;
-        border: 1px solid rgba(255,255,255,0.12) !important;
-        border-radius: 24px !important;
-        color: #fff !important;
-        padding: 12px 18px !important;
-        font-size: 1rem !important;
-        height: 52px !important;
-    }
-    /* Camera button */
-    div[data-testid="stHorizontalBlock"]:has(div[data-testid="stTextInput"]) [data-testid="stBaseButton-secondary"] button {
-        height: 52px !important;
-        border-radius: 50% !important;
-        font-size: 1.2rem !important;
+    /* Hide H_ bridge text input */
+    div[data-testid="stTextInput"]:has(input[placeholder="__bridge__"]) {
+        display: none !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        margin: 0 !important;
         padding: 0 !important;
-        background-color: #23252f !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        width: 100% !important;
-        min-width: 0 !important;
     }
 
     /* Hide avatars on native st.chat_message (used for live exchange only) */
@@ -2075,36 +2062,105 @@ if st.session_state.view_selection == "🍽️ Log":
             unsafe_allow_html=True
         )
 
-    # Chat input — plain st.text_input + st.button stay inside columns,
-    # unlike st.form_submit_button which escapes its column container.
-    # Enter key in text_input triggers a rerun; we guard against accidental
-    # submission when the camera button is tapped by checking cam_pressed.
-    if "meal_input_gen" not in st.session_state:
-        st.session_state.meal_input_gen = 0
+    # --- Custom input row via iframe + H_ bridge ---
+    # st.columns fails to keep buttons inline on mobile for all widget types
+    # tested (chat_input, form_submit_button, regular button). The iframe
+    # approach (same as nav) guarantees layout control.
 
-    col_text, col_cam = st.columns([9, 1])
-    with col_text:
-        typed = st.text_input(
-            "meal_input",
-            placeholder="Describe your meal...",
-            label_visibility="collapsed",
-            key=f"meal_text_{st.session_state.meal_input_gen}"
-        )
-    with col_cam:
-        cam_label = "✕" if st.session_state.pending_image else "📷"
-        cam_pressed = st.button(cam_label, key="cam_inline", use_container_width=True)
+    # Bridge widgets rendered in Streamlit DOM (hidden via CSS)
+    h_send = st.button("H_SEND", key="h_send_bridge")
+    h_cam  = st.button("H_CAM",  key="h_cam_bridge")
+    h_meal_draft = st.text_input(
+        "bridge", placeholder="__bridge__",
+        key="h_meal_draft", label_visibility="collapsed"
+    )
 
-    if cam_pressed:
+    cam_icon = "✕" if st.session_state.pending_image else "📷"
+    input_iframe_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: transparent; overflow: hidden;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+  .row {{ display: flex; gap: 8px; align-items: center; padding: 4px 2px; }}
+  .meal-input {{
+    flex: 1; background: #1e2029;
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 24px;
+    color: #fff; padding: 0 18px; font-size: 1rem; height: 52px; outline: none;
+  }}
+  .meal-input::placeholder {{ color: #555; }}
+  .meal-input:focus {{ border-color: rgba(255,255,255,0.28); }}
+  .cam-btn {{
+    width: 52px; height: 52px; flex-shrink: 0; border-radius: 50%;
+    background: #23252f; border: 1px solid rgba(255,255,255,0.08);
+    color: #fff; font-size: 1.3rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }}
+  .cam-btn:active {{ background: #2e3142; }}
+</style>
+</head>
+<body>
+<div class="row">
+  <input type="text" class="meal-input" placeholder="Describe your meal..." id="mealInput">
+  <button class="cam-btn" id="camBtn">{cam_icon}</button>
+</div>
+<script>
+  const inp = document.getElementById('mealInput');
+  const cam = document.getElementById('camBtn');
+
+  function setReactValue(el, val) {{
+    try {{
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value').set;
+      setter.call(el, val);
+      el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    }} catch(e) {{}}
+  }}
+
+  function clickBridge(label) {{
+    try {{
+      window.parent.document.querySelectorAll('button p').forEach(p => {{
+        if (p.textContent.trim() === label) p.parentElement.click();
+      }});
+    }} catch(e) {{}}
+  }}
+
+  function submitText() {{
+    const text = inp.value.trim();
+    if (!text) return;
+    try {{
+      const hidden = window.parent.document.querySelector('input[placeholder="__bridge__"]');
+      if (hidden) {{ setReactValue(hidden, text); }}
+    }} catch(e) {{}}
+    inp.value = '';
+    setTimeout(() => clickBridge('H_SEND'), 80);
+  }}
+
+  inp.addEventListener('keydown', e => {{
+    if (e.key === 'Enter') {{ e.preventDefault(); submitText(); }}
+  }});
+
+  cam.addEventListener('click', () => clickBridge('H_CAM'));
+</script>
+</body>
+</html>"""
+    components.html(input_iframe_html, height=64, scrolling=False)
+
+    # Handle bridge events
+    if h_send:
+        raw = st.session_state.get("h_meal_draft", "").strip()
+        st.session_state.h_meal_draft = ""
+        user_input = raw if raw else None
+    elif h_cam:
         if st.session_state.pending_image:
             st.session_state.pending_image = None
         else:
             st.session_state.show_camera = not st.session_state.show_camera
         st.rerun()
-
-    # Only process text if cam wasn't clicked (avoids blur-on-camera-tap issue)
-    user_input = typed.strip() if typed and typed.strip() and not cam_pressed else None
-    if user_input:
-        st.session_state.meal_input_gen += 1  # clears the input widget on next render
+    else:
+        user_input = None
 
     if user_input:
         # 1. Prepare segments for UI and Gemini
