@@ -236,18 +236,6 @@ st.markdown("""
         padding: 0 !important;
         overflow: hidden !important;
     }
-    /* Bridge text_input — hidden OFFSCREEN (not display:none) so React keeps tracking
-       its value and includes it in the widget state sent with each button click. */
-    div[data-testid="stVerticalBlock"] > div:has(input[placeholder="__bridge__"]) {
-        position: absolute !important;
-        left: -9999px !important;
-        top: 0 !important;
-        width: 1px !important;
-        height: 1px !important;
-        overflow: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }
 
     /* Hide avatars on native st.chat_message (used for live exchange only) */
     [data-testid="stChatMessageAvatarUser"],
@@ -2141,22 +2129,14 @@ if st.session_state.view_selection == "🍽️ Log":
     # tested (chat_input, form_submit_button, regular button). The iframe
     # approach (same as nav) guarantees layout control.
 
-    # Bridge widgets — buttons in one columns row (JS hides that stHorizontalBlock).
-    # CRITICAL: bridge text_input must be OUTSIDE the hidden block — Streamlit's React
-    # does not capture widget values from inside display:none containers, so h_send
-    # would always receive draft='' if the input is inside the hidden block.
-    # The text_input is hidden via CSS offscreen positioning (not display:none)
-    # so React continues to track and report its value with each button click.
+    # Bridge widgets — buttons only.  Text is passed via URL query param _rt_meal,
+    # written synchronously via window.parent.history.replaceState in the iframe JS
+    # before H_SEND is clicked.  No cross-frame React events needed.
     _bc = st.columns([1, 1])
     with _bc[0]:
         h_send = st.button("H_SEND", key="h_send_bridge")
     with _bc[1]:
         h_cam = st.button("H_CAM", key="h_cam_bridge")
-    # Separate row — hidden offscreen via CSS, stays in React's live state
-    h_meal_draft = st.text_input(
-        "bridge", placeholder="__bridge__",
-        key="h_meal_draft", label_visibility="collapsed"
-    )
 
     cam_icon = "✕" if st.session_state.pending_image else "📷"
     input_iframe_html = f"""<!DOCTYPE html>
@@ -2196,18 +2176,6 @@ if st.session_state.view_selection == "🍽️ Log":
   const dbgEl = document.getElementById('dbg');
   function dbg(msg) {{ if (dbgEl) dbgEl.textContent = msg; }}
 
-  // Must use parent window's prototype — el lives in parent DOM, not iframe DOM
-  function setReactValue(el, val) {{
-    try {{
-      const setter = Object.getOwnPropertyDescriptor(
-        window.parent.HTMLInputElement.prototype, 'value').set;
-      setter.call(el, val);
-      el.dispatchEvent(new Event('input',  {{ bubbles: true }}));
-      el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-      return true;
-    }} catch(e) {{ dbg('setReact ERR: ' + e.message); return false; }}
-  }}
-
   function clickBridge(label) {{
     try {{
       let n = 0;
@@ -2218,38 +2186,31 @@ if st.session_state.view_selection == "🍽️ Log":
     }} catch(e) {{ dbg('clickBridge ERR: ' + e.message); return -1; }}
   }}
 
-  // Probe the parent DOM and report what's visible — useful for debugging
+  // Probe: confirm H_SEND / H_CAM buttons exist in parent DOM
   function probe() {{
     try {{
-      const d = window.parent.document;
-      const bridgeInp = d.querySelector('input[placeholder="__bridge__"]');
-      const sendBtns = [...d.querySelectorAll('button p')].filter(p => p.textContent.trim() === 'H_SEND');
-      const camBtns  = [...d.querySelectorAll('button p')].filter(p => p.textContent.trim() === 'H_CAM');
-      dbg(`probe: bridge=${{bridgeInp ? 'FOUND' : 'NULL'}} H_SEND=${{sendBtns.length}} H_CAM=${{camBtns.length}}`);
+      const btns = window.parent.document.querySelectorAll('button p');
+      const ns = [...btns].filter(p => p.textContent.trim() === 'H_SEND').length;
+      const nc = [...btns].filter(p => p.textContent.trim() === 'H_CAM').length;
+      const url = window.parent.location.search;
+      dbg(`probe: H_SEND=${{ns}} H_CAM=${{nc}} url=${{url.substring(0,40)}}`);
     }} catch(e) {{ dbg('probe ERR: ' + e.message); }}
   }}
 
-  // Hide the bridge button block (H_SEND / H_CAM stHorizontalBlock) via JS —
-  // CSS :has()/:contains() has first-render timing issues.
-  // NOTE: bridge text_input is NOT in this block (it's a separate row hidden
-  // via CSS offscreen positioning so React keeps tracking its value).
+  // Hide the bridge button block (H_SEND / H_CAM stHorizontalBlock) via JS
   function hideBridgeBlock() {{
     try {{
-      const d = window.parent.document;
-      d.querySelectorAll('button p').forEach(p => {{
+      window.parent.document.querySelectorAll('button p').forEach(p => {{
         if (p.textContent.trim() !== 'H_SEND') return;
         let el = p;
-        while (el && el !== d.body) {{
+        while (el && el !== window.parent.document.body) {{
           if (el.dataset && el.dataset.testid === 'stHorizontalBlock') {{
-            // Set individual properties — don't use cssText overwrite which
-            // could clobber flex layout styles React needs internally.
-            const targets = [el, el.parentElement].filter(Boolean);
-            targets.forEach(t => {{
-              t.style.display   = 'none';
-              t.style.height    = '0';
-              t.style.margin    = '0';
-              t.style.padding   = '0';
-              t.style.overflow  = 'hidden';
+            [el, el.parentElement].filter(Boolean).forEach(t => {{
+              t.style.display  = 'none';
+              t.style.height   = '0';
+              t.style.margin   = '0';
+              t.style.padding  = '0';
+              t.style.overflow = 'hidden';
             }});
             break;
           }}
@@ -2260,30 +2221,23 @@ if st.session_state.view_selection == "🍽️ Log":
   }}
   hideBridgeBlock();
   setInterval(hideBridgeBlock, 300);
-
-  // Run probe every second so the debug line is always fresh
   probe();
   setInterval(probe, 1000);
 
   function submitText() {{
     const text = inp.value.trim();
     if (!text) {{ dbg('submit: no text'); return; }}
-    dbg('submit: searching bridge input...');
+    // Write text to URL query param synchronously — no cross-frame React events needed.
+    // Streamlit reads st.query_params on the rerun triggered by H_SEND click.
     try {{
-      const d = window.parent.document;
-      const hidden = d.querySelector('input[placeholder="__bridge__"]');
-      if (hidden) {{
-        const ok = setReactValue(hidden, text);
-        dbg('submit: bridge ' + (ok ? 'value set ✓' : 'setReact failed'));
-      }} else {{
-        dbg('submit: bridge input NOT FOUND — check placeholder');
-      }}
-    }} catch(e) {{ dbg('submit ERR: ' + e.message); }}
+      const url = new window.parent.URL(window.parent.location.href);
+      url.searchParams.set('_rt_meal', text);
+      window.parent.history.replaceState({{}}, '', url.toString());
+      dbg('submit: param set, clicking H_SEND...');
+    }} catch(e) {{ dbg('replaceState ERR: ' + e.message); return; }}
     inp.value = '';
-    setTimeout(() => {{
-      const n = clickBridge('H_SEND');
-      dbg('submit: H_SEND clicked=' + n + ' (n<1 means button not found)');
-    }}, 120);
+    const n = clickBridge('H_SEND');
+    dbg('submit: H_SEND clicked=' + n);
   }}
 
   // Restore any draft the user had typed before the camera rerun erased the iframe
@@ -2310,14 +2264,13 @@ if st.session_state.view_selection == "🍽️ Log":
     components.html(input_iframe_html, height=84, scrolling=False)
 
     # --- DEBUG: show bridge state on every render (remove when submission works) ---
-    _dbg_draft = st.session_state.get("h_meal_draft", "")
-    _dbg_last  = st.session_state.get("_h_meal_last_sent", "")
-    st.caption(f"🔍 h_send={h_send} | h_cam={h_cam} | draft='{_dbg_draft[:30]}' | last='{_dbg_last[:20]}'")
+    _dbg_qp   = st.query_params.get("_rt_meal", "")
+    _dbg_last = st.session_state.get("_h_meal_last_sent", "")
+    st.caption(f"🔍 h_send={h_send} | h_cam={h_cam} | qparam='{_dbg_qp[:30]}' | last='{_dbg_last[:20]}'")
 
-    # Handle bridge events
+    # Handle bridge events — text arrives via URL query param _rt_meal
     if h_send:
-        raw = st.session_state.get("h_meal_draft", "").strip()
-        # Guard against double-submission: skip if same text was already processed
+        raw = st.query_params.get("_rt_meal", "").strip()
         last = st.session_state.get("_h_meal_last_sent", "")
         if raw and raw != last:
             st.session_state._h_meal_last_sent = raw
