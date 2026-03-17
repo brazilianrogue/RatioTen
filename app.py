@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os as _os
+# PREVIEW_MODE: inject stub env vars so layout can be tested locally
+# without real API credentials. Real env vars always take precedence.
+_os.environ.setdefault("GEMINI_API_KEY", "_preview_")
+_os.environ.setdefault("GCP_SERVICE_ACCOUNT_JSON", '{"type":"service_account"}')
+del _os
 import re
 import time
 from datetime import datetime, timedelta
@@ -1664,10 +1670,23 @@ nav_html = f"""
             el.style.overflow = 'visible';
             el.style.boxSizing = 'border-box';
           }}
-          // Compensate page layout: push content below the fixed nav.
-          // Use iframe's rendered height (includes safe-area padding from CSS).
-          const navH = (iframe.offsetHeight || 140) + 4;
-          const want = navH + 'px';
+          // Hide zero-height pre-nav flex siblings so they contribute no
+          // flex gap and no visible space between nav and first card.
+          for (const child of p.children) {{
+            if (child === el) break;
+            const pos = getComputedStyle(child).position;
+            if (pos !== 'fixed' && pos !== 'absolute' && child.offsetHeight === 0) {{
+              child.style.display = 'none';
+            }}
+          }}
+          // Compute paddingTop from ACTUAL bounding rects so the
+          // calculation is device-aware (works with any safe-area inset).
+          // navBottom = bottom edge of nav iframe in the viewport.
+          // vbTop = top edge of stVerticalBlock in the viewport.
+          // With pre-nav items hidden there are no extra flex gaps to subtract.
+          const navBottom = iframe.getBoundingClientRect().bottom || (iframe.offsetHeight || 140);
+          const vbTop = p.getBoundingClientRect().top || 0;
+          const want = Math.max(0, navBottom - vbTop + 4) + 'px';
           if (p.style.paddingTop !== want) p.style.paddingTop = want;
           return;
         }}
@@ -2268,12 +2287,13 @@ if st.session_state.view_selection == "🍽️ Log":
         el = el.parentElement;
       }}
       // Ensure page content isn't hidden under the fixed bar.
+      // Account for safeBottom so content clears the bar even when it
+      // sits above the iPhone home-bar region.
       try {{
         const root = window.parent.document.querySelector('[data-testid="stAppViewBlockContainer"]')
                   || window.parent.document.querySelector('[data-testid="stVerticalBlock"]');
-        if (root && !root._rtPadded) {{
-          root.style.paddingBottom = '68px';
-          root._rtPadded = true;
+        if (root) {{
+          root.style.paddingBottom = (safeBottom + 68) + 'px';
         }}
       }} catch(e) {{}}
     }} catch(e) {{}}
