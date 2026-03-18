@@ -219,6 +219,19 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .s-moderate { background:rgba(252,163,17,0.15); color:var(--accent); }
 .s-poor     { background:rgba(220,53,69,0.15);  color:var(--red); }
 .tip-box { background:rgba(0,166,255,0.07); border:1px solid rgba(0,166,255,0.2); border-radius:var(--radius); padding:10px 14px; margin-bottom:16px; font-size:0.85rem; color:#b0c8e0; }
+.eff-calc-link { display:block; width:fit-content; margin:-4px auto 14px; background:none; border:none; color:rgba(0,166,255,0.5); font-size:0.76rem; cursor:pointer; text-decoration:underline; font-family:var(--font); }
+.eff-calc-link:hover { color:rgba(0,166,255,0.85); }
+/* Effectiveness modal */
+#eff-modal { position:fixed; inset:0; background:rgba(0,0,0,0.82); z-index:1000; overflow-y:auto; padding:20px 16px; display:none; }
+.eff-modal-inner { max-width:560px; margin:0 auto; background:var(--card2); border:1px solid rgba(255,255,255,0.1); border-radius:16px; padding:24px 20px 28px; position:relative; }
+.eff-modal-close { position:absolute; top:14px; right:16px; background:none; border:none; color:var(--muted); font-size:1.3rem; cursor:pointer; line-height:1; }
+.eff-modal-close:hover { color:#fff; }
+.eff-modal-inner h2 { font-size:1rem; font-weight:700; margin:0 0 14px; color:#fff; padding-right:28px; }
+.eff-modal-inner h4 { font-size:0.8rem; color:var(--accent); margin:18px 0 7px; text-transform:uppercase; letter-spacing:.05em; }
+.eff-modal-inner p  { font-size:0.82rem; color:rgba(216,216,224,0.85); line-height:1.65; margin:0 0 8px; }
+.eff-modal-inner ul { font-size:0.82rem; color:rgba(216,216,224,0.85); line-height:1.65; padding-left:18px; margin:4px 0 10px; }
+.eff-modal-inner strong { color:#fff; }
+.eff-modal-formula { background:rgba(255,255,255,0.05); border-radius:8px; padding:8px 12px; font-size:0.8rem; color:rgba(0,166,255,0.85); margin:8px 0; font-style:italic; text-align:center; }
 
 /* Trailing 7 table */
 .data-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
@@ -481,6 +494,7 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       </svg>
     </div>
 
+    <button class="eff-calc-link" onclick="openEffModal()">How is this calculated?</button>
     <div class="driver-grid" id="driver-grid"></div>
     <div class="tip-box" id="coach-tip" style="display:none"></div>
 
@@ -510,6 +524,52 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       Previous 10 Days
     </div>
     <div id="history-timelines"></div>
+  </div>
+
+  <!-- EFFECTIVENESS MODAL -->
+  <div id="eff-modal" onclick="if(event.target===this)closeEffModal()">
+    <div class="eff-modal-inner">
+      <button class="eff-modal-close" onclick="closeEffModal()">&#x2715;</button>
+      <h2>Plan Effectiveness Score Breakdown</h2>
+
+      <p><strong>How is the Plan Effectiveness Score Calculated?</strong></p>
+      <p>The Plan Effectiveness Score is a powerful tool designed to measure how well you are adhering to your nutritional goals and how your body is responding over a 14-day period. Whether your goal is to lose body fat or build lean muscle, consistent feedback is the key to maximizing your progress. This score provides an objective, data-driven look at your consistency so you can calibrate your approach and avoid guessing.</p>
+
+      <h4>The Two Core Components</h4>
+      <p>Your score, which ranges from a minimum of <strong>1.0</strong> to a maximum of <strong>10.0</strong>, is built on two primary factors: <strong>Adherence</strong> and <strong>Weight Shift</strong>.</p>
+
+      <h4>1. Daily Adherence <span style="font-weight:400;color:var(--muted)">(Up to 5.0 Points)</span></h4>
+      <p>The first half of your score measures your day-to-day consistency over the last 14 days. We break each day down into a <strong>10-Point System</strong>, then average across the 14 days:</p>
+      <ul>
+        <li><strong>Calories (4 Points):</strong> Full points for staying under your Calorie Lid (target + 100).</li>
+        <li><strong>Protein (4 Points):</strong> Full points for hitting your <strong>Dynamic Protein Floor</strong>. Required protein scales with your eating window — a 6+ hour window asks for 100% of your goal; an OMAD (1 hour) window scales down to 30%.</li>
+        <li><strong>Fasting Timing (2 Points):</strong> Full points if all logged items fall within your scheduled eating window (with a generous 1-hour buffer). A full Fasting/Skip day at 0 calories also yields full points.</li>
+      </ul>
+      <div class="eff-modal-formula">Adherence Score = (Average Daily Points ÷ 10) × 5.0</div>
+      <p>If you log 14 days and hit your targets perfectly every day, you earn a perfect 5.0 for this section. Hit it half the time, you earn 2.5. This rewards consistency.</p>
+
+      <h4>2. Weight Shift Focus <span style="font-weight:400;color:var(--muted)">(Up to 5.0 Points)</span></h4>
+      <p>Even with perfect adherence, your body's response is the ultimate truth. The second half looks at actual weight movement over the 14-day window. To smooth out daily fluctuations, the system compares your lowest weight from the first 7 days to your lowest weight from the past 7 days:</p>
+      <div class="eff-modal-formula">Weight Shift = Min. Weight (Week 1) − Min. Weight (Week 2)</div>
+      <ul>
+        <li><strong>Weight Loss (+5.0 Points):</strong> If your minimum weight dropped by 1.0 lb or more, you earn the full 5 points.</li>
+        <li><strong>Maintenance (+2.0 to +4.9 Points):</strong> If your weight stayed the same or dropped slightly (0–0.9 lbs), you earn a partial score between 2.0 and 4.9.</li>
+        <li><strong>Weight Gain (−2.0 Points):</strong> If your minimum weight increased by more than 0.5 lbs, 2.0 points are subtracted. This flags whether a surplus is appropriate.</li>
+      </ul>
+
+      <h4>Note on Avg Density (Score Driver)</h4>
+      <p>The "Avg Density" metric uses a <strong>Calorie-Weighted Aggregate</strong> over 14 days — it calculates <em>Total Protein ÷ Total Calories</em>. This prevents short feeding days (OMAD) from disproportionately punishing your average.</p>
+
+      <h4>Scenarios &amp; Scores</h4>
+      <ul>
+        <li><strong>Scenario A — The Perfect Run:</strong> 14/14 days at 10/10 points (5.0) + lowest weight down 1.5 lbs (5.0). <strong>Total: 10.0.</strong> Plan is perfectly calibrated—keep going!</li>
+        <li><strong>Scenario B — High Adherence, Slow Movement:</strong> 10/10 every day (5.0) but weight only dropped 0.5 lbs (+3.5). <strong>Total: 8.5.</strong> Signal to slightly lower your Calorie Lid to accelerate fat loss.</li>
+        <li><strong>Scenario C — Low Adherence, Weight Gain:</strong> Averaging 4/10 per day (2.0) and weight up 1 lb (−2.0). <strong>Total: 1.0</strong> (minimum). Not a failure — vital feedback to get back to hitting daily targets.</li>
+      </ul>
+
+      <h4>Why Feedback Matters</h4>
+      <p>By combining your daily input (Adherence) with your biological output (Weight Shift), the Plan Effectiveness Score acts as your compass. It removes the emotion from the scale and replaces it with clear math, empowering you to adjust and reach your goals.</p>
+    </div>
   </div>
 
   <!-- PLAN VIEW -->
@@ -1044,15 +1104,41 @@ function renderEffectiveness(eff) {
   const adRate = d.total_days > 0 ? Math.round((d.adherent_days / d.total_days) * 100) : 0;
   const logRate = d.logging_pct != null ? Math.round(d.logging_pct) : null;
 
+  function protocolStatus(r) {
+    if (r >= 85) return { label_s: 'Optimal',      cls: 's-optimal' };
+    if (r >= 70) return { label_s: 'Inconsistent', cls: 's-moderate' };
+    return              { label_s: 'Needs Focus',  cls: 's-poor' };
+  }
+  function densityStatus(v) {
+    if (v >= 10.5) return { label_s: 'Lean',     cls: 's-optimal' };
+    if (v >= 9.5)  return { label_s: 'Moderate', cls: 's-moderate' };
+    return                { label_s: 'Improve',  cls: 's-poor' };
+  }
+  function weightStatus(shift) {
+    if (shift >= 0.8) return { label_s: 'Losing',  cls: 's-optimal' };
+    if (shift >= 0)   return { label_s: 'Steady',  cls: 's-moderate' };
+    return                   { label_s: 'Gaining', cls: 's-poor' };
+  }
+  function logStatus(r) {
+    if (r >= 80) return { label_s: 'Consistent', cls: 's-optimal' };
+    if (r >= 60) return { label_s: 'Partial',    cls: 's-moderate' };
+    return              { label_s: 'Sparse',      cls: 's-poor' };
+  }
+
+  const tipProtocol = "Average daily adherence score (Calories, Dynamic Protein, Fasting Window).\nStatuses:\n• Optimal (≥85%)\n• Inconsistent (70-84%)\n• Needs Focus (<70%)";
+  const tipProtein  = "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥10.5%)\n• Moderate (9.5-10.4%)\n• Improve (<9.5%)";
+  const tipWeight   = "14-day weight shift (Week 1 vs Week 2).\nStatuses:\n• Losing (≥0.8 lbs drop)\n• Steady (0-0.7 lbs drop)\n• Gaining (Weight increased)";
+  const tipLogging  = "Percentage of days logged in the past 14 days.\nStatuses:\n• Consistent (≥80%)\n• Partial (60-79%)\n• Sparse (<60%)";
+
   const drivers = [
-    { label: 'Protocol Success',   value: `${d.adherent_days || 0}/${d.total_days || 0} days`, ...statusObj(adRate, 85, 70) },
-    { label: 'Avg Density',        value: `${(d.avg_density||0).toFixed(1)}%`,                 ...statusObj(d.avg_density||0, 10.5, 9.5) },
-    { label: 'Weight Trend',       value: `${(d.weight_shift||0) > 0 ? '-' : '+'}${Math.abs(d.weight_shift||0).toFixed(1)} lbs`, ...statusObj(d.weight_shift||0, 0.8, 0) },
-    { label: 'Log Consistency',    value: logRate != null ? `${logRate}%` : '—',               ...(logRate != null ? statusObj(logRate, 80, 60) : { label_s: 'No Data', cls: '' }) },
+    { label: 'Protocol Success', value: `${d.adherent_days || 0}/${d.total_days || 0} days`, ...protocolStatus(adRate),  tip: tipProtocol },
+    { label: 'Avg Density',      value: `${(d.avg_density||0).toFixed(1)}%`,                 ...densityStatus(d.avg_density||0), tip: tipProtein },
+    { label: 'Weight Trend',     value: `${(d.weight_shift||0) >= 0 ? '-' : '+'}${Math.abs(d.weight_shift||0).toFixed(1)} lbs`, ...weightStatus(d.weight_shift||0), tip: tipWeight },
+    { label: 'Log Consistency',  value: logRate != null ? `${logRate}%` : '—', ...(logRate != null ? logStatus(logRate) : { label_s: 'No Data', cls: '' }), tip: tipLogging },
   ];
 
   grid.innerHTML = drivers.map(dr => `
-    <div class="driver-card">
+    <div class="driver-card" title="${dr.tip.replace(/"/g,'&quot;')}">
       <div class="driver-label">${dr.label}</div>
       <div class="driver-value">${dr.value}</div>
       <span class="driver-status ${dr.cls}">${dr.label_s}</span>
@@ -1066,11 +1152,8 @@ function renderEffectiveness(eff) {
   }
 }
 
-function statusObj(val, good, ok) {
-  if (val >= good) return { label_s: 'Optimal',     cls: 's-optimal' };
-  if (val >= ok)   return { label_s: 'Consistent',  cls: 's-moderate' };
-  return                  { label_s: 'Needs Focus', cls: 's-poor' };
-}
+function openEffModal()  { document.getElementById('eff-modal').style.display = 'block'; document.body.style.overflow = 'hidden'; }
+function closeEffModal() { document.getElementById('eff-modal').style.display = 'none';  document.body.style.overflow = ''; }
 
 function coachTip(d) {
   const logPct = d.logging_pct || 0;
