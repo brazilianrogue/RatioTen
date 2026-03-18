@@ -70,10 +70,15 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 #content {
   position: fixed;
   top:    calc(var(--nav-h) + env(safe-area-inset-top, 0px));
-  bottom: 0; left: 0; right: 0;
-  padding-bottom: calc(var(--bar-h) + env(safe-area-inset-bottom, 0px) + 8px);
+  bottom: calc(var(--bar-h) + env(safe-area-inset-bottom, 0px));
+  left: 0; right: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+/* Stats/Plan: no input bar, content fills to safe-area bottom */
+#content.no-bar {
+  bottom: env(safe-area-inset-bottom, 0px);
 }
 .view { display: none; padding: 12px 14px; }
 .view.active { display: block; }
@@ -214,7 +219,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .section-hdr svg { stroke:var(--accent); width:18px; height:18px; }
 
 /* ── Analyze view ─────────────────────────────────────────────────────── */
-.gauge-wrap { margin:4px 0 12px; }
+.gauge-wrap { margin:0 0 6px; }
 #gauge-fill { transition: stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1); }
 #gauge-glow { transition: stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1), opacity 0.9s ease; }
 .driver-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px; }
@@ -226,7 +231,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .s-moderate { background:rgba(252,163,17,0.15); color:var(--accent); }
 .s-poor     { background:rgba(220,53,69,0.15);  color:var(--red); }
 .tip-box { background:rgba(0,166,255,0.07); border:1px solid rgba(0,166,255,0.2); border-radius:var(--radius); padding:10px 14px; margin-bottom:16px; font-size:0.85rem; color:#b0c8e0; }
-.eff-calc-link { display:block; width:fit-content; margin:-4px auto 14px; background:none; border:none; color:rgba(0,166,255,0.5); font-size:0.76rem; cursor:pointer; text-decoration:underline; font-family:var(--font); }
+.eff-calc-link { display:block; width:fit-content; margin:-4px auto 8px; background:none; border:none; color:rgba(0,166,255,0.5); font-size:0.76rem; cursor:pointer; text-decoration:underline; font-family:var(--font); }
 .eff-calc-link:hover { color:rgba(0,166,255,0.85); }
 /* Effectiveness modal */
 #eff-modal { position:fixed; inset:0; background:rgba(0,0,0,0.82); z-index:1000; overflow-y:auto; padding:20px 16px; display:none; }
@@ -876,6 +881,7 @@ function switchView(name) {
   } else {
     bar.classList.remove('visible');
   }
+  document.getElementById('content').classList.toggle('no-bar', name !== 'log');
   if (name === 'analyze') loadAnalyze();
   if (name === 'plan' && !state.planLoaded) loadPlan();
 }
