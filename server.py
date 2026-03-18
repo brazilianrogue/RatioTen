@@ -200,6 +200,32 @@ def _read_lowest_weight() -> Optional[float]:
         return None
 
 
+def _read_weight_history() -> list:
+    """Returns last 30 weight entries as [{date, weight}], oldest first."""
+    try:
+        sh = _get_sh()
+        try:
+            ws = sh.worksheet(WS_WEIGHT_LOGS)
+        except gspread.WorksheetNotFound:
+            return []
+        data = ws.get_all_records()
+        if not data:
+            return []
+        entries = []
+        for r in data:
+            date_val   = r.get("Date") or r.get("Timestamp") or r.get("date") or ""
+            weight_val = r.get("Weight (lbs)")
+            if date_val and weight_val:
+                try:
+                    entries.append({"date": str(date_val)[:10], "weight": float(weight_val)})
+                except (ValueError, TypeError):
+                    pass
+        entries.sort(key=lambda x: x["date"])
+        return entries[-30:]
+    except Exception:
+        return []
+
+
 def _read_today_logs() -> list:
     try:
         sh = _get_sh()
@@ -658,10 +684,11 @@ async def index():
 
 @app.get("/api/dashboard")
 async def dashboard():
-    schedule      = _cached("schedule",      600, _read_fasting_schedule)
-    goals         = _cached("goals",         600, _read_user_goals)
-    today_logs    = _cached("today_logs",     60, _read_today_logs)
-    lowest_weight = _cached("lowest_weight", 3600, _read_lowest_weight)
+    schedule       = _cached("schedule",       600,  _read_fasting_schedule)
+    goals          = _cached("goals",          600,  _read_user_goals)
+    today_logs     = _cached("today_logs",      60,  _read_today_logs)
+    lowest_weight  = _cached("lowest_weight", 3600,  _read_lowest_weight)
+    weight_history = _cached("weight_history", 3600, _read_weight_history)
 
     # Today's totals
     cals    = sum(l["calories"] for l in today_logs)
@@ -676,6 +703,7 @@ async def dashboard():
         "density":        density,
         "goals":          goals,
         "lowest_weight":  lowest_weight,
+        "weight_history": weight_history,
         "fasting_status": fasting_status,
         "target_ts":      target_ts,
     }

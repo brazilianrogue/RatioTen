@@ -410,7 +410,6 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
         <div class="status-label" id="status-label">Loading…</div>
         <div class="status-timer" id="status-timer">--:--:--</div>
       </div>
-      <div class="card-value" id="record-low" style="font-size:0.85rem;color:var(--muted)"></div>
     </div>
 
     <div class="cards-row" id="metric-cards">
@@ -427,6 +426,42 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       <div class="card">
         <div class="card-label">Density</div>
         <div class="card-value" id="m-dens">—</div>
+      </div>
+    </div>
+
+    <!-- Weight Record + Sparkline Card -->
+    <div id="weight-card" style="display:none; margin:0 12px 12px; background:var(--card); border-radius:var(--radius); border:1px solid var(--border); padding:14px 16px 12px; overflow:hidden;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <!-- Left: icon + label + value -->
+        <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+          <!-- Bathroom scale icon -->
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style="flex-shrink:0;">
+            <rect x="3" y="10" width="30" height="20" rx="5" fill="rgba(252,163,17,0.12)" stroke="#fca311" stroke-width="1.5"/>
+            <rect x="3" y="10" width="30" height="8" rx="5" fill="rgba(252,163,17,0.18)"/>
+            <ellipse cx="18" cy="14" rx="5" ry="2.5" fill="rgba(252,163,17,0.35)"/>
+            <circle cx="18" cy="14" r="1.5" fill="#fca311"/>
+            <!-- tick marks on face -->
+            <line x1="9"  y1="22" x2="9"  y2="25" stroke="#fca311" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+            <line x1="13" y1="21" x2="13" y2="25" stroke="#fca311" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+            <line x1="18" y1="21" x2="18" y2="26" stroke="#fca311" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="23" y1="21" x2="23" y2="25" stroke="#fca311" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+            <line x1="27" y1="22" x2="27" y2="25" stroke="#fca311" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+            <!-- needle pointing to center = on target -->
+            <line x1="18" y1="14" x2="18" y2="22" stroke="#fca311" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <div>
+            <div style="font-size:0.62rem; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; margin-bottom:2px;">Record Low</div>
+            <div id="weight-value" style="font-size:1.55rem; font-weight:700; color:var(--text); line-height:1;">—</div>
+            <div id="weight-sub" style="font-size:0.68rem; color:var(--muted); margin-top:2px;"></div>
+          </div>
+        </div>
+        <!-- Right: sparkline -->
+        <div style="flex-shrink:0;">
+          <div style="font-size:0.6rem; color:var(--muted); text-align:right; letter-spacing:.06em; text-transform:uppercase; margin-bottom:4px;">30-day trend</div>
+          <svg id="weight-sparkline" width="130" height="44" viewBox="0 0 130 44" style="display:block; overflow:visible;">
+            <text x="65" y="26" text-anchor="middle" font-size="10" fill="rgba(106,106,138,0.5)">loading…</text>
+          </svg>
+        </div>
       </div>
     </div>
 
@@ -664,6 +699,45 @@ function switchView(name) {
 // ── Helpers ────────────────────────────────────────────────────────────────
 function fmt(n) { return Number(n).toLocaleString(); }
 
+function drawWeightSparkline(history) {
+  const svg = document.getElementById('weight-sparkline');
+  if (!svg || !history || history.length < 2) return;
+  const W = 130, H = 44, PAD = 4;
+  const weights = history.map(h => h.weight);
+  const minW = Math.min(...weights);
+  const maxW = Math.max(...weights);
+  const range = maxW - minW || 1;
+
+  // Map each point — high weight = high on screen (small y), low weight = low on screen (large y)
+  // so a weight-loss trend draws as a visually downward line (intuitive for fitness)
+  const pts = weights.map((w, i) => {
+    const x = PAD + (i / (weights.length - 1)) * (W - PAD * 2);
+    const y = PAD + (1 - (w - minW) / range) * (H - PAD * 2);  // high weight → low y → top of chart
+    return [x, y];
+  });
+
+  const line   = pts.map(p => p.join(',')).join(' ');
+  const area   = `${pts[0][0]},${H} ` + pts.map(p => p.join(',')).join(' ') + ` ${pts[pts.length-1][0]},${H}`;
+
+  // Green if trending downward (last y > first y = weight decreased = line visually falls)
+  const trending = pts[pts.length-1][1] > pts[0][1];
+  const lineCol  = trending ? '#00c97a' : '#fca311';
+  const fillStop = trending ? '#00c97a' : '#fca311';
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="${fillStop}" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="${fillStop}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <polygon points="${area}" fill="url(#sg)"/>
+    <polyline points="${line}" fill="none" stroke="${lineCol}" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${pts[pts.length-1][0]}" cy="${pts[pts.length-1][1]}" r="2.5"
+            fill="${lineCol}" stroke="var(--card)" stroke-width="1.5"/>`;
+}
+
 function mdToHtml(text) {
   // Strip JSON meal-log block (internal logging artifact, never show to user)
   text = text.replace(/```json\s*\[[\s\S]*?\]\s*```/g, '').trim();
@@ -734,9 +808,24 @@ async function loadDashboard() {
     lbl.textContent  = dash.fasting_status;
     startTimer();
 
-    // Record low
-    const rl = document.getElementById('record-low');
-    rl.textContent = dash.lowest_weight ? `🏆 ${parseFloat(dash.lowest_weight).toFixed(1)} lbs` : '';
+    // Weight record card + sparkline
+    if (dash.lowest_weight) {
+      const wc = document.getElementById('weight-card');
+      wc.style.display = 'block';
+      document.getElementById('weight-value').textContent = `${parseFloat(dash.lowest_weight).toFixed(1)} lbs`;
+
+      // Sub-label: how far from current weight
+      const history = dash.weight_history || [];
+      if (history.length > 0) {
+        const latest = history[history.length - 1].weight;
+        const diff   = parseFloat((latest - dash.lowest_weight).toFixed(1));
+        const sub    = document.getElementById('weight-sub');
+        sub.textContent = diff <= 0 ? '🎯 At record low' : `${diff} lbs from record`;
+        sub.style.color = diff <= 0.5 ? 'var(--green)' : 'var(--muted)';
+      }
+
+      drawWeightSparkline(history);
+    }
 
     // Metric cards
     const goals = dash.goals;
