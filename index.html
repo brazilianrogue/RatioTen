@@ -235,13 +235,91 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
 }
 .form-input:focus { border-color:rgba(255,255,255,0.25); }
 .density-hint { font-size:0.75rem; color:var(--blue); margin-top:4px; }
-.day-row {
-  display:flex; align-items:center; gap:8px; padding:8px 0;
-  border-bottom:1px solid rgba(255,255,255,0.04);
+/* ── Schedule visual widget ───────────────────────────────────────────── */
+.sched-week-strip {
+  display:grid; grid-template-columns:repeat(7,1fr); gap:5px; margin-bottom:14px;
 }
-.day-name { width:90px; font-weight:600; font-size:0.9rem; flex-shrink:0; }
-.day-toggle { display:flex; align-items:center; gap:6px; font-size:0.8rem; color:var(--muted); flex-shrink:0; }
-.day-times { display:flex; gap:8px; flex:1; }
+.sched-day-chip {
+  display:flex; flex-direction:column; align-items:center; gap:5px;
+  padding:8px 3px 7px; border-radius:12px;
+  border:1px solid rgba(255,255,255,0.06);
+  background:rgba(255,255,255,0.025);
+  cursor:pointer; transition:border-color 0.18s, background 0.18s;
+  user-select:none;
+}
+.sched-day-chip:active { background:rgba(255,255,255,0.05); }
+.sched-day-chip.is-selected {
+  border-color:rgba(0,166,255,0.45);
+  background:rgba(0,166,255,0.07);
+}
+.sched-chip-abbrev {
+  font-size:0.6rem; font-weight:700; letter-spacing:0.06em;
+  color:var(--muted); text-transform:uppercase;
+}
+.sched-day-chip.is-selected .sched-chip-abbrev { color:#00A6FF; }
+.sched-bar-track {
+  position:relative; width:7px; height:60px;
+  background:rgba(255,255,255,0.06); border-radius:4px; overflow:visible;
+}
+.sched-bar-fill {
+  position:absolute; left:0; right:0; border-radius:3px;
+  background:linear-gradient(to bottom, rgba(0,100,255,0.55), #00A6FF);
+  box-shadow:0 0 5px rgba(0,166,255,0.5);
+}
+.sched-day-chip.is-fasting .sched-bar-track { opacity:0.35; }
+.sched-chip-label {
+  font-size:0.55rem; color:var(--muted); text-align:center;
+  line-height:1.2; min-height:14px;
+}
+.sched-day-chip.is-selected .sched-chip-label { color:rgba(0,166,255,0.8); }
+/* Detail panel */
+.sched-detail {
+  background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.07);
+  border-radius:14px; padding:16px; animation:fadeSlide 0.18s ease;
+}
+@keyframes fadeSlide {
+  from { opacity:0; transform:translateY(-6px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.sched-detail-hdr {
+  display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;
+}
+.sched-detail-day { font-size:1rem; font-weight:700; }
+/* Toggle pill */
+.sched-pill-wrap {
+  display:flex; align-items:center; gap:8px; cursor:pointer;
+}
+.sched-pill-wrap input { display:none; }
+.sched-pill {
+  width:38px; height:21px; border-radius:11px;
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12);
+  position:relative; transition:background 0.2s, border-color 0.2s; flex-shrink:0;
+}
+.sched-pill::after {
+  content:''; position:absolute; top:2px; left:2px;
+  width:15px; height:15px; border-radius:50%;
+  background:rgba(255,255,255,0.35); transition:transform 0.2s, background 0.2s;
+}
+.sched-pill-wrap input:checked + .sched-pill {
+  background:rgba(0,166,255,0.28); border-color:rgba(0,166,255,0.5);
+}
+.sched-pill-wrap input:checked + .sched-pill::after {
+  transform:translateX(17px); background:#00A6FF;
+}
+.sched-pill-lbl { font-size:0.78rem; color:var(--muted); }
+/* Time row */
+.sched-times { transition:opacity 0.18s; }
+.sched-times.is-fasting { opacity:0.3; pointer-events:none; }
+.sched-time-row { display:flex; align-items:center; gap:10px; }
+.sched-time-field { flex:1; display:flex; flex-direction:column; gap:5px; }
+.sched-time-field label {
+  font-size:0.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em;
+}
+.sched-time-sep { color:var(--muted); font-size:1rem; margin-top:18px; }
+.sched-window-dur {
+  margin-top:12px; text-align:center; font-size:0.8rem;
+  color:rgba(0,166,255,0.65); letter-spacing:0.03em;
+}
 .time-input {
   flex:1; background:var(--card); border:1px solid rgba(255,255,255,0.1);
   border-radius:8px; color:#fff; padding:6px 10px; font-size:0.9rem; outline:none;
@@ -1079,54 +1157,158 @@ async function saveGoals() {
   btn.disabled = false;
 }
 
-function buildSchedForm(sched) {
-  const form = document.getElementById('sched-form');
-  form.innerHTML = '';
-  DAYS.forEach(day => {
-    const t = sched[day] || { start: null, end: null };
-    const isFast = !t.start;
-    const row = document.createElement('div');
-    row.className = 'day-row';
-    row.innerHTML = `
-      <div class="day-name">${day.slice(0,3)}</div>
-      <label class="day-toggle">
-        <input type="checkbox" id="fast-${day}" ${isFast?'checked':''} onchange="toggleFastDay('${day}')">
-        Fast
-      </label>
-      <div class="day-times" id="times-${day}" style="${isFast?'opacity:0.3;pointer-events:none':''}">
-        <input type="time" class="time-input" id="start-${day}" value="${t.start||'12:00'}" ${isFast?'disabled':''}>
-        <input type="time" class="time-input" id="end-${day}"   value="${t.end||'18:00'}  " ${isFast?'disabled':''}>
-      </div>`;
-    form.appendChild(row);
-  });
+// ── Schedule visual widget ──────────────────────────────────────────────
+let scheduleData  = {};  // { Monday: {start:'12:00',end:'18:00'} | {start:null,end:null} }
+let schedSelectedDay = null;
+
+const SCHED_RANGE_START = 8 * 60;  // 08:00 in mins
+const SCHED_RANGE_END   = 22 * 60; // 22:00 in mins
+
+function timeToMins(t) {
+  const [h, m] = (t || '0:0').split(':').map(Number);
+  return h * 60 + m;
+}
+function fmtShort(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h >= 12 ? 'p' : 'a';
+  const h12  = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+  return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2,'0')}${ampm}`;
+}
+function windowDur(start, end) {
+  if (!start || !end) return null;
+  const mins = timeToMins(end) - timeToMins(start);
+  if (mins <= 0) return null;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m === 0 ? `${h}h window` : `${h}h ${m}m window`;
 }
 
-function toggleFastDay(day) {
-  const isFast = document.getElementById('fast-'+day).checked;
-  const timesDiv = document.getElementById('times-'+day);
-  timesDiv.style.opacity = isFast ? '0.3' : '1';
-  timesDiv.style.pointerEvents = isFast ? 'none' : '';
-  document.getElementById('start-'+day).disabled = isFast;
-  document.getElementById('end-'+day).disabled   = isFast;
+function buildSchedForm(sched) {
+  DAYS.forEach(day => {
+    scheduleData[day] = sched[day] || { start: null, end: null };
+  });
+  renderSchedWidget();
+}
+
+function renderSchedWidget() {
+  const range = SCHED_RANGE_END - SCHED_RANGE_START;
+
+  // Build 7 chips
+  const chips = DAYS.map(day => {
+    const d       = scheduleData[day];
+    const isFast  = !d.start;
+    const abbrev  = day.slice(0,3).toUpperCase();
+    const sel     = schedSelectedDay === day;
+
+    let barFill = '';
+    if (!isFast) {
+      const sM  = Math.max(SCHED_RANGE_START, timeToMins(d.start));
+      const eM  = Math.min(SCHED_RANGE_END,   timeToMins(d.end));
+      const top = ((sM - SCHED_RANGE_START) / range * 100).toFixed(1);
+      const ht  = Math.max(0, ((eM - sM) / range * 100)).toFixed(1);
+      barFill = `<div class="sched-bar-fill" style="top:${top}%;height:${ht}%"></div>`;
+    }
+
+    const lbl = isFast ? 'Fast' : `${fmtShort(d.start)}–${fmtShort(d.end)}`;
+
+    return `<div class="sched-day-chip${isFast?' is-fasting':''}${sel?' is-selected':''}"
+                 onclick="selectSchedDay('${day}')">
+      <div class="sched-chip-abbrev">${abbrev}</div>
+      <div class="sched-bar-track">${barFill}</div>
+      <div class="sched-chip-label">${lbl}</div>
+    </div>`;
+  }).join('');
+
+  // Build detail panel for selected day
+  let detail = '';
+  if (schedSelectedDay) {
+    const d      = scheduleData[schedSelectedDay];
+    const isFast = !d.start;
+    const dur    = windowDur(d.start, d.end);
+
+    detail = `
+    <div class="sched-detail">
+      <div class="sched-detail-hdr">
+        <span class="sched-detail-day">${schedSelectedDay}</span>
+        <label class="sched-pill-wrap">
+          <input type="checkbox" ${isFast?'':'checked'}
+                 onchange="toggleSchedDay('${schedSelectedDay}',this.checked)">
+          <span class="sched-pill"></span>
+          <span class="sched-pill-lbl">${isFast ? 'Fasting Day' : 'Eating Window'}</span>
+        </label>
+      </div>
+      <div class="sched-times${isFast?' is-fasting':''}">
+        <div class="sched-time-row">
+          <div class="sched-time-field">
+            <label>Window Opens</label>
+            <input type="time" class="time-input" value="${d.start||'12:00'}"
+                   onchange="updateSchedTime('${schedSelectedDay}','start',this.value)">
+          </div>
+          <div class="sched-time-sep">→</div>
+          <div class="sched-time-field">
+            <label>Window Closes</label>
+            <input type="time" class="time-input" value="${d.end||'18:00'}"
+                   onchange="updateSchedTime('${schedSelectedDay}','end',this.value)">
+          </div>
+        </div>
+        ${dur ? `<div class="sched-window-dur">${dur}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('sched-form').innerHTML =
+    `<div class="sched-week-strip">${chips}</div>${detail}`;
+}
+
+function selectSchedDay(day) {
+  schedSelectedDay = schedSelectedDay === day ? null : day;
+  renderSchedWidget();
+}
+
+function toggleSchedDay(day, hasWindow) {
+  scheduleData[day] = hasWindow
+    ? { start: '12:00', end: '18:00' }
+    : { start: null, end: null };
+  renderSchedWidget();
+}
+
+function updateSchedTime(day, field, val) {
+  scheduleData[day][field] = val;
+  // Re-render just the chips strip (not detail) to avoid losing focus
+  const range = SCHED_RANGE_END - SCHED_RANGE_START;
+  document.querySelectorAll('.sched-day-chip').forEach((chip, i) => {
+    const d      = scheduleData[DAYS[i]];
+    const isFast = !d.start;
+    const track  = chip.querySelector('.sched-bar-track');
+    const lbl    = chip.querySelector('.sched-chip-label');
+    let fill = '';
+    if (!isFast) {
+      const sM = Math.max(SCHED_RANGE_START, timeToMins(d.start));
+      const eM = Math.min(SCHED_RANGE_END,   timeToMins(d.end));
+      const top = ((sM - SCHED_RANGE_START) / range * 100).toFixed(1);
+      const ht  = Math.max(0, ((eM - sM) / range * 100)).toFixed(1);
+      fill = `<div class="sched-bar-fill" style="top:${top}%;height:${ht}%"></div>`;
+    }
+    track.innerHTML = fill;
+    lbl.textContent = isFast ? 'Fast' : `${fmtShort(d.start)}–${fmtShort(d.end)}`;
+    // update duration label without full re-render
+    const durEl = document.querySelector('.sched-window-dur');
+    if (durEl) {
+      const dur = windowDur(scheduleData[day].start, scheduleData[day].end);
+      durEl.textContent = dur || '';
+    }
+  });
 }
 
 async function saveSchedule() {
-  const body = {};
-  DAYS.forEach(day => {
-    const isFast = document.getElementById('fast-'+day).checked;
-    body[day] = isFast ? { start: null, end: null } : {
-      start: document.getElementById('start-'+day).value,
-      end:   document.getElementById('end-'+day).value,
-    };
-  });
   try {
     await fetch('/api/schedule', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body),
+      body: JSON.stringify(scheduleData),
     });
     showMsg('sched-msg', '✅ Schedule saved', 'var(--green)');
-    loadDashboard(); // refresh timer
+    loadDashboard();
   } catch(e) {
     showMsg('sched-msg', '❌ Failed to save', 'var(--red)');
   }
