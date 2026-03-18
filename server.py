@@ -588,7 +588,7 @@ def _make_chat_session(model_id: str, system_prompt: str, history: list):
         parts = []
         for c in msg.get("content", []):
             if isinstance(c, str) and c.strip():
-                parts.append(genai.types.Part.from_text(c))
+                parts.append(genai.types.Part.from_text(text=c))
         if parts:
             genai_history.append(genai.types.Content(role=role, parts=parts))
     return client.chats.create(model=model_id, config=cfg, history=genai_history)
@@ -748,7 +748,7 @@ async def chat(
                 parts = []
                 if image_bytes:
                     parts.append(genai.types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
-                parts.append(text)
+                parts.append(genai.types.Part.from_text(text=text))
 
                 for chunk in session.send_message_stream(parts):
                     token = ""
