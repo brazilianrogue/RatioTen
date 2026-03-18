@@ -162,8 +162,11 @@ st.markdown("""
         z-index: 9999 !important;
         margin: 0 !important;
         padding: 0 !important;
-        overflow: visible !important;
-        height: auto !important;
+        /* Clip the dark area below the visual nav bar so no "ghost gap" appears.
+           80px = nav bar visual height (logo row + tab row). env() adds the
+           Dynamic Island / status-bar safe area on iPhone. */
+        height: calc(env(safe-area-inset-top, 0px) + 80px) !important;
+        overflow: hidden !important;
     }
 
     /* Hide pre-nav zero-height children so they contribute no flex gap */
@@ -2178,6 +2181,27 @@ if st.session_state.view_selection == "🍽️ Log":
   #ch::-webkit-scrollbar-thumb{{background:#2a2a2a;border-radius:2px;}}
 </style>
 <div id="ch">{inner}</div>
+<script>
+(function(){{
+  // Scroll the parent page so this iframe's bottom clears the fixed input bar (64px).
+  // Runs after a short delay to let the parent layout settle.
+  function nudgeParent(){{
+    try{{
+      const p = window.parent;
+      const frame = window.frameElement;
+      if (!frame) return;
+      const bottom = frame.getBoundingClientRect().bottom;
+      const inputBarH = 64;
+      const safeBottom = p.innerHeight - inputBarH - 8;
+      if (bottom > safeBottom) {{
+        p.scrollBy({{top: bottom - safeBottom, behavior: 'instant'}});
+      }}
+    }}catch(e){{}}
+  }}
+  setTimeout(nudgeParent, 200);
+  setTimeout(nudgeParent, 600);
+}})();
+</script>
 """
 
     st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
