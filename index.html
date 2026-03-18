@@ -80,6 +80,14 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 #content.no-bar {
   bottom: env(safe-area-inset-bottom, 0px);
 }
+/* Fill the safe-area gap below the input bar with the page background */
+body::after {
+  content: '';
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 99;
+  height: env(safe-area-inset-bottom, 0px);
+  background: var(--bg);
+  pointer-events: none;
+}
 .view { display: none; padding: 12px 14px; }
 .view.active { display: block; }
 
@@ -182,6 +190,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 /* ── Chat ─────────────────────────────────────────────────────────────── */
 #chat-list {
   display:flex; flex-direction:column; gap:6px; padding-bottom:4px;
+  max-height:55vh; overflow-y:auto; -webkit-overflow-scrolling:touch;
 }
 .bubble-row { display:flex; }
 .bubble-row.user { justify-content:flex-end; }
@@ -880,7 +889,7 @@ function switchView(name) {
   } else {
     bar.classList.remove('visible');
   }
-  document.getElementById('content').classList.toggle('no-bar', name !== 'log');
+  syncContentBottom();
   if (name === 'analyze') loadAnalyze();
   if (name === 'plan' && !state.planLoaded) loadPlan();
 }
@@ -1185,10 +1194,23 @@ function appendBubble(role, text, streaming = false) {
 }
 
 function scrollChat() {
-  requestAnimationFrame(() => {
-    const content = document.getElementById('content');
-    content.scrollTop = content.scrollHeight;
-  });
+  const list = document.getElementById('chat-list');
+  list.scrollTop = list.scrollHeight;
+}
+
+// Measure the actual rendered bar height and pin #content bottom to it.
+// Avoids relying on env() evaluating identically in both the bar height
+// and the content bottom calc — which can race on iOS PWA initial layout.
+function syncContentBottom() {
+  const bar  = document.getElementById('input-bar');
+  const cont = document.getElementById('content');
+  if (bar.classList.contains('visible')) {
+    cont.style.bottom = bar.getBoundingClientRect().height + 'px';
+    cont.classList.remove('no-bar');
+  } else {
+    cont.style.removeProperty('bottom');   // fall back to CSS (.no-bar)
+    cont.classList.add('no-bar');
+  }
 }
 
 // ── Chat submit ────────────────────────────────────────────────────────────
@@ -1859,6 +1881,9 @@ function showMsg(id, msg, color) {
 (async function init() {
   // Show input bar for log view
   document.getElementById('input-bar').classList.add('visible');
+  // Sync content bottom after bar renders, and on every resize/orientation change
+  requestAnimationFrame(syncContentBottom);
+  window.addEventListener('resize', syncContentBottom);
   // Load dashboard data
   await Promise.all([loadDashboard(), loadChatHistory()]);
   // Refresh dashboard every 30s
