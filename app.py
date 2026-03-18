@@ -147,58 +147,15 @@ st.markdown("""
         max-width: 100% !important;
     }
 
-    /* ── NAV: CSS-pinned to viewport top ──────────────────────────────────────
-       The nav wrapper is always the 4th child of the outermost stVerticalBlock
-       (children 1-3 are two st.markdown injections + one PWA height=0 iframe).
-       Using CSS !important here is critical: Streamlit's 1-second timer causes
-       React rerenders that reset JS-applied inline position:fixed back to relative.
-       A stylesheet rule with !important survives React reconciliation. */
-    .block-container > div[data-testid="stVerticalBlock"] > div:nth-child(4) {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: 100vw !important;
-        z-index: 9999 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        /* Clip the dark area below the visual nav bar so no "ghost gap" appears.
-           80px = nav bar visual height (logo row + tab row). env() adds the
-           Dynamic Island / status-bar safe area on iPhone. */
-        height: calc(env(safe-area-inset-top, 0px) + 80px) !important;
-        overflow: hidden !important;
-    }
-
-    /* Hide pre-nav zero-height children so they contribute no flex gap */
-    .block-container > div[data-testid="stVerticalBlock"] > div:nth-child(-n+3) {
-        display: none !important;
-    }
-
-    /* Push page content below the 140px nav iframe + 4px gap.
-       calc() uses env(safe-area-inset-top) which IS active on iPhone because
-       Streamlit's WKWebView uses viewport-fit=cover (confirmed: removing it
-       caused nav to overlap the Dynamic Island / status bar icons).
-       Targets only the outermost stVerticalBlock. */
-    .block-container > div[data-testid="stVerticalBlock"] {
-        padding-top: calc(env(safe-area-inset-top, 0px) + 84px) !important;
-    }
-
-    /* ── INPUT BAR: CSS-pinned to viewport bottom ──────────────────────────
-       Same React-rerender problem as nav. The input bar iframe wrapper is the
-       last stElementContainer before the nav-bridge stLayoutWrapper at the
-       very end of the page. Target it as :nth-last-child(2) so it stays fixed
-       regardless of how many elements precede it. */
-    .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"]:nth-last-child(2) {
-        position: fixed !important;
-        bottom: env(safe-area-inset-bottom, 0px) !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 64px !important;
-        z-index: 999 !important;
-        overflow: visible !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
+    /* ── NAV + INPUT BAR: positioned entirely via JS MutationObserver ─────────
+       CSS nth-child selectors were unreliable across Streamlit versions and
+       failed silently on the Render/iPhone deployment.  Layout-critical pinning
+       (nav top, input bar bottom, stVB padding-top) is now handled 100% in the
+       nav iframe's JS which: (a) finds elements by DOM traversal from
+       window.frameElement so it never depends on nth-child counts, (b) reads
+       safe-area values from this iframe's own computed CSS where env() works
+       reliably, and (c) uses MutationObserver to reapply styles the instant
+       React reconciliation clears them — no polling needed.               */
 
     /* Hide Streamlit's built-in footer to remove blank space at page bottom */
     footer, [data-testid="stStatusWidget"], #MainMenu { display: none !important; }
@@ -1607,8 +1564,12 @@ nav_html = f"""
   body {{
     margin: 0;
     padding: 0;
-    /* Push nav content below iOS Dynamic Island / notch */
+    /* Push nav content below iOS Dynamic Island / notch.
+       JS reads getComputedStyle(body).paddingTop to get the exact pixel value
+       of env(safe-area-inset-top) — used for navH and stVB padding calculation. */
     padding-top: env(safe-area-inset-top, 0px);
+    /* CSS variable for safe-bottom — readable by JS via getPropertyValue */
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background: #0e1117; /* fills the notch area so it blends with the page */
     overflow: hidden;
@@ -1688,77 +1649,169 @@ nav_html = f"""
   }}
 </style>
 <script>
+  // ── Tab navigation bridge ────────────────────────────────────────────────────
   function switchTab(tab_label) {{
-    const buttons = window.parent.document.querySelectorAll('button p');
-    buttons.forEach(p => {{
-        if (p.textContent === tab_label) {{
-            p.parentElement.click();
-        }}
+    window.parent.document.querySelectorAll('button p').forEach(p => {{
+      if (p.textContent === tab_label) p.parentElement.click();
     }});
   }}
-  
-  // Bridge is now handled in the main st.markdown block for cleaner scope
 
-  // Pin nav to top of viewport.
-  // Safe-area offset is handled by body padding-top:env(safe-area-inset-top)
-  // directly in this iframe's CSS, so we never add paddingTop to the
-  // Streamlit container (avoids overflow:hidden clipping the iframe).
-  function pinNav() {{
+  // ── LAYOUT CONTROLLER ───────────────────────────────────────────────────────
+  // Previous approach: CSS nth-child selectors with !important.
+  // Why it failed on iPhone/Render: the deployed Streamlit DOM structure differs
+  // from local dev, so nth-child counts were wrong and selectors never matched.
+  //
+  // New approach:
+  //   1. Find elements via DOM traversal from window.frameElement — zero
+  //      dependence on nth-child or Streamlit version-specific DOM structure.
+  //   2. Read safe-area insets from THIS iframe's own CSS (where env() works
+  //      correctly on iPhone because we control this document's viewport meta).
+  //   3. Apply inline styles with setProperty(...,'important') so they beat
+  //      any conflicting CSS rule.
+  //   4. MutationObserver on the nav wrapper + stVB: reapplies the moment
+  //      React reconciliation clears our inline styles — no polling gap.
+
+  let _navWrapper = null;
+  let _mainVB     = null;
+
+  // Safe-area-top: read from this body's computed paddingTop.
+  // (body has padding-top:env(safe-area-inset-top,0px) in its CSS — works on iPhone.)
+  function getSafeTop() {{
+    return Math.round(parseFloat(getComputedStyle(document.body).paddingTop) || 0);
+  }}
+
+  // Safe-area-bottom: probe via a fixed-bottom div inside this iframe.
+  function getSafeBottom() {{
+    var probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;bottom:0;left:0;width:1px;' +
+      'height:env(safe-area-inset-bottom,0px);pointer-events:none;visibility:hidden;';
+    document.body.appendChild(probe);
+    var h = Math.round(probe.getBoundingClientRect().height);
+    document.body.removeChild(probe);
+    return h;
+  }}
+
+  function findElements() {{
     try {{
-      const iframe = window.frameElement;
-      if (!iframe) return;
-      let el = iframe;
+      var frame = window.frameElement;
+      if (!frame) return false;
+      var el = frame;
       while (el && el.parentElement) {{
+        if (el.parentElement.getAttribute &&
+            el.parentElement.getAttribute('data-testid') === 'stVerticalBlock') {{
+          _navWrapper = el;
+          _mainVB     = el.parentElement;
+          return true;
+        }}
         el = el.parentElement;
-        const p = el.parentElement;
-        if (p && p.getAttribute('data-testid') === 'stVerticalBlock') {{
-          if (el.style.position !== 'fixed') {{
-            el.style.position = 'fixed';
-            el.style.top = '0';
-            el.style.left = '0';
-            el.style.right = '0';
-            el.style.zIndex = '9999';
-            el.style.width = '100vw';
-            el.style.margin = '0';
-            el.style.padding = '0';
-            el.style.background = 'transparent';
-            el.style.overflow = 'visible';
-            el.style.boxSizing = 'border-box';
-          }}
-          // paddingTop is handled by CSS calc(env(safe-area-inset-top)+80px).
-          // JS must NOT override it — leave inline style unset so CSS wins.
-          // Hide zero-height pre-nav flex siblings so they contribute no
-          // flex gap that would add extra space below the nav bar.
-          for (const child of p.children) {{
-            if (child === el) break;
-            const pos = getComputedStyle(child).position;
-            if (pos !== 'fixed' && pos !== 'absolute' && child.offsetHeight === 0) {{
-              child.style.display = 'none';
-            }}
-          }}
-          return;
+      }}
+    }} catch(e) {{}}
+    return false;
+  }}
+
+  function setProp(el, prop, val) {{
+    try {{ el.style.setProperty(prop, val, 'important'); }} catch(e) {{}}
+  }}
+
+  function applyLayout() {{
+    try {{
+      if (!_navWrapper && !findElements()) return;
+
+      var safeTop    = getSafeTop();
+      var safeBottom = getSafeBottom();
+      var navH       = safeTop + 80;   // safe-area + visual nav bar height
+
+      // ── Pin nav wrapper to viewport top ──
+      setProp(_navWrapper, 'position', 'fixed');
+      setProp(_navWrapper, 'top',      '0');
+      setProp(_navWrapper, 'left',     '0');
+      setProp(_navWrapper, 'right',    '0');
+      setProp(_navWrapper, 'width',    '100vw');
+      setProp(_navWrapper, 'z-index',  '9999');
+      setProp(_navWrapper, 'margin',   '0');
+      setProp(_navWrapper, 'padding',  '0');
+      setProp(_navWrapper, 'height',   navH + 'px');   // clips dark area below bar
+      setProp(_navWrapper, 'overflow', 'hidden');
+
+      // ── Hide pre-nav zero-height siblings (flex gap sources) ──
+      var sib = _navWrapper.previousElementSibling;
+      while (sib) {{
+        setProp(sib, 'display', 'none');
+        sib = sib.previousElementSibling;
+      }}
+
+      // ── Shift page content below the nav ──
+      setProp(_mainVB, 'padding-top', (navH + 4) + 'px');
+
+      // ── Find and pin the input bar iframe wrapper ──
+      // The input bar is the last iframe in _mainVB with height ~64px.
+      var iframes = _mainVB.querySelectorAll('iframe');
+      var inputFrame = null;
+      for (var i = iframes.length - 1; i >= 0; i--) {{
+        if (iframes[i] === window.frameElement) continue;
+        var r = iframes[i].getBoundingClientRect();
+        if (r.height >= 50 && r.height <= 100 && r.width > 100) {{
+          inputFrame = iframes[i];
+          break;
+        }}
+      }}
+      if (inputFrame) {{
+        // Walk up to the direct child of _mainVB
+        var iel = inputFrame;
+        while (iel && iel.parentElement && iel.parentElement !== _mainVB) {{
+          iel = iel.parentElement;
+        }}
+        if (iel && iel !== _mainVB) {{
+          setProp(iel, 'position', 'fixed');
+          setProp(iel, 'bottom',   safeBottom + 'px');
+          setProp(iel, 'left',     '0');
+          setProp(iel, 'width',    '100%');
+          setProp(iel, 'height',   '64px');
+          setProp(iel, 'z-index',  '999');
+          setProp(iel, 'overflow', 'visible');
+          setProp(iel, 'margin',   '0');
+          setProp(iel, 'padding',  '0');
         }}
       }}
     }} catch(e) {{}}
   }}
-  pinNav();
-  setInterval(pinNav, 300);
 
-  // Hide the nav bridge button row (H_LOG/H_ANALYZE/H_PLAN stHorizontalBlock)
-  // and the chat input bridge button row (H_SEND/H_CAM stHorizontalBlock).
-  // Running from the nav iframe (first to load) means this fires before the
-  // user sees any layout, eliminating the gap between nav and metric cards.
+  // Run immediately so layout is applied before first paint
+  applyLayout();
+  setTimeout(applyLayout, 120);
+  setTimeout(applyLayout, 450);
+  setTimeout(applyLayout, 1200);
+
+  // MutationObservers: reapply the instant React touches our elements.
+  // This fires as a microtask — before the next paint — so the user never
+  // sees the un-fixed state even during aggressive 1-second rerenders.
+  setTimeout(function() {{
+    if (!_navWrapper && !findElements()) return;
+
+    // Nav wrapper style reset by React → re-pin immediately
+    new MutationObserver(applyLayout).observe(_navWrapper, {{
+      attributes: true, attributeFilter: ['style']
+    }});
+    // stVB padding-top reset → re-apply immediately
+    new MutationObserver(applyLayout).observe(_mainVB, {{
+      attributes: true, attributeFilter: ['style']
+    }});
+    // New children added (rerenders add the input bar iframe later) → re-scan
+    new MutationObserver(function() {{ setTimeout(applyLayout, 60); }})
+      .observe(_mainVB, {{ childList: true, subtree: false }});
+  }}, 300);
+
+  // ── Bridge button hider ──────────────────────────────────────────────────────
   function hideBridgeRows() {{
     try {{
-      const d = window.parent.document;
-      const targets = ['H_LOG', 'H_SEND'];  // one representative per block
-      targets.forEach(label => {{
-        d.querySelectorAll('button p').forEach(p => {{
+      var d = window.parent.document;
+      ['H_LOG', 'H_SEND'].forEach(function(label) {{
+        d.querySelectorAll('button p').forEach(function(p) {{
           if (p.textContent.trim() !== label) return;
-          let el = p;
+          var el = p;
           while (el && el !== d.body) {{
             if (el.dataset && el.dataset.testid === 'stHorizontalBlock') {{
-              [el, el.parentElement].filter(Boolean).forEach(t => {{
+              [el, el.parentElement].filter(Boolean).forEach(function(t) {{
                 t.style.display  = 'none';
                 t.style.height   = '0';
                 t.style.margin   = '0';
@@ -1775,12 +1828,9 @@ nav_html = f"""
   }}
   hideBridgeRows();
   setInterval(hideBridgeRows, 300);
-  // MutationObserver: fires synchronously as Streamlit adds nodes to the DOM,
-  // hiding bridge rows before the browser ever paints them.
-  // This is the primary fix for the nav-to-cards gap on initial load.
   try {{
-    const _obs = new MutationObserver(hideBridgeRows);
-    _obs.observe(window.parent.document.body, {{ childList: true, subtree: true }});
+    new MutationObserver(hideBridgeRows)
+      .observe(window.parent.document.body, {{ childList: true, subtree: true }});
   }} catch(e) {{}}
 </script>
 </head>
@@ -2314,42 +2364,26 @@ if st.session_state.view_selection == "🍽️ Log":
   hideBridgeBlock();
   setInterval(hideBridgeBlock, 300);
 
-  // Pin this iframe to the bottom of the viewport so it stays visible
-  // regardless of scroll position (mirrors how st.chat_input behaves).
+  // Fallback: pin this iframe to the bottom of the viewport.
+  // Primary pinning is handled by the nav iframe's JS layout controller
+  // (which uses MutationObserver for instant re-application after rerenders).
+  // This runs once on load as a safety net in case the nav JS hasn't fired yet.
   function pinInputBar() {{
     try {{
       const frame = window.frameElement;
       if (!frame) return;
-      // Pin bar above the home-bar indicator. CSS env() in inline styles is
-      // supported on iOS Safari — no JS probe needed.
-      frame.style.position = 'fixed';
-      frame.style.bottom   = 'env(safe-area-inset-bottom, 0px)';
-      frame.style.left     = '0';
-      frame.style.width    = '100%';
-      frame.style.height   = '64px';
-      frame.style.zIndex   = '999';
-      frame.style.border   = 'none';
-      // Collapse every wrapper div in the normal-flow layout so the
-      // fixed iframe doesn't create a gap / blank space at its original position.
-      let el = frame.parentElement;
-      while (el && el !== window.parent.document.body) {{
-        // Check BEFORE modifying: never collapse a stVerticalBlock because
-        // that wrapper contains all of the view's content (metric cards,
-        // chat history, etc.) — collapsing it hides the entire Log view.
-        if (el.dataset && el.dataset.testid === 'stVerticalBlock') break;
-        if (el.style.height !== '0px') {{
-          el.style.height    = '0px';
-          el.style.minHeight = '0px';
-          el.style.overflow  = 'hidden';
-          el.style.padding   = '0';
-          el.style.margin    = '0';
-        }}
-        el = el.parentElement;
-      }}
+      if (frame.style.position === 'fixed') return; // already pinned by nav controller
+      frame.style.setProperty('position', 'fixed',  'important');
+      frame.style.setProperty('bottom',   '0',       'important');
+      frame.style.setProperty('left',     '0',       'important');
+      frame.style.setProperty('width',    '100%',    'important');
+      frame.style.setProperty('height',   '64px',    'important');
+      frame.style.setProperty('z-index',  '999',     'important');
+      frame.style.setProperty('border',   'none',    'important');
     }} catch(e) {{}}
   }}
   pinInputBar();
-  setInterval(pinInputBar, 500);
+  setTimeout(pinInputBar, 300);
 
   function submitText() {{
     const text = inp.value.trim();
