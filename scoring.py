@@ -259,6 +259,8 @@ def calculate_plan_effectiveness(
             days_with_data = sum(
                 1 for d in daily_data.values() if not d.get("is_missing", False)
             )
+            drivers["logging_pct"] = (days_with_data / total_days_eval * 100) if total_days_eval > 0 else 0.0
+
             if days_with_data < MIN_DAYS_FOR_SCORE:
                 return (
                     None,
