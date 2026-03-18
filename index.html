@@ -33,7 +33,7 @@
   --radius:  12px;
   --font:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
+html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
 
 /* ── Fixed nav ────────────────────────────────────────────────────────── */
 #nav {
@@ -182,7 +182,6 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 /* ── Chat ─────────────────────────────────────────────────────────────── */
 #chat-list {
   display:flex; flex-direction:column; gap:6px; padding-bottom:4px;
-  max-height:55vh; overflow-y:auto; -webkit-overflow-scrolling:touch;
 }
 .bubble-row { display:flex; }
 .bubble-row.user { justify-content:flex-end; }
@@ -1186,8 +1185,10 @@ function appendBubble(role, text, streaming = false) {
 }
 
 function scrollChat() {
-  const list = document.getElementById('chat-list');
-  list.scrollTop = list.scrollHeight;
+  requestAnimationFrame(() => {
+    const content = document.getElementById('content');
+    content.scrollTop = content.scrollHeight;
+  });
 }
 
 // ── Chat submit ────────────────────────────────────────────────────────────
