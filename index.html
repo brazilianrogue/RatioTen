@@ -326,6 +326,13 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   font-family:var(--font); text-align:center;
 }
 .time-input:disabled { opacity:0.35; }
+.time-select {
+  flex:1; background:var(--card); border:1px solid rgba(255,255,255,0.1);
+  border-radius:8px; color:#fff; padding:8px 10px; font-size:0.95rem; outline:none;
+  font-family:var(--font); text-align:center; cursor:pointer;
+  appearance:none; -webkit-appearance:none;
+}
+.time-select:focus { border-color:rgba(255,255,255,0.25); }
 .save-btn {
   width:100%; padding:13px; border-radius:12px; border:none;
   background:var(--accent); color:#161821; font-size:1rem; font-weight:700;
@@ -1158,34 +1165,61 @@ async function saveGoals() {
 }
 
 // ── Schedule visual widget ──────────────────────────────────────────────
-let scheduleData  = {};  // { Monday: {start:'12:00',end:'18:00'} | {start:null,end:null} }
+let scheduleData  = {};
 let schedSelectedDay = null;
 
-const SCHED_RANGE_START = 8 * 60;  // 08:00 in mins
-const SCHED_RANGE_END   = 22 * 60; // 22:00 in mins
+const SCHED_RANGE_START = 8 * 60;   // 08:00
+const SCHED_RANGE_END   = 24 * 60;  // midnight (end of day)
 
+// Hour 1–23 for opens, 2–24 for closes. 24 = "12a" midnight = stored as 23:59
+const OPEN_HOURS  = Array.from({length:23}, (_,i) => i + 1);   // 1..23
+const CLOSE_HOURS = Array.from({length:23}, (_,i) => i + 2);   // 2..24
+
+function hourLabel(h) {
+  if (h === 24 || h === 0) return '12a';
+  if (h === 12) return '12p';
+  return h < 12 ? `${h}a` : `${h - 12}p`;
+}
+function hourToTime(h)  { return h >= 24 ? '23:59' : `${String(h).padStart(2,'0')}:00`; }
+function timeToHour(t, isEnd) {
+  if (!t) return null;
+  if (t === '23:59') return 24;
+  const h = parseInt(t.split(':')[0], 10);
+  // If end time parses as 00 it's midnight → treat as 24
+  return (isEnd && h === 0) ? 24 : h;
+}
 function timeToMins(t) {
+  if (t === '23:59') return 24 * 60;
   const [h, m] = (t || '0:0').split(':').map(Number);
   return h * 60 + m;
 }
 function fmtShort(t) {
   if (!t) return '';
-  const [h, m] = t.split(':').map(Number);
-  const ampm = h >= 12 ? 'p' : 'a';
-  const h12  = h > 12 ? h - 12 : (h === 0 ? 12 : h);
-  return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2,'0')}${ampm}`;
+  if (t === '23:59') return '12a';
+  const [h] = t.split(':').map(Number);
+  return hourLabel(h);
 }
 function windowDur(start, end) {
   if (!start || !end) return null;
   const mins = timeToMins(end) - timeToMins(start);
-  if (mins <= 0) return null;
+  if (mins < 60) return null;
   const h = Math.floor(mins / 60), m = mins % 60;
   return m === 0 ? `${h}h window` : `${h}h ${m}m window`;
 }
 
 function buildSchedForm(sched) {
   DAYS.forEach(day => {
-    scheduleData[day] = sched[day] || { start: null, end: null };
+    const d = sched[day] || { start: null, end: null };
+    if (!d.start) {
+      scheduleData[day] = { start: null, end: null };
+    } else {
+      // Normalize to whole hours, enforce ≥1h gap
+      let sh = timeToHour(d.start, false) || 12;
+      let eh = timeToHour(d.end,   true)  || 18;
+      sh = Math.max(1,  Math.min(23, sh));
+      eh = Math.max(sh + 1, Math.min(24, eh));
+      scheduleData[day] = { start: hourToTime(sh), end: hourToTime(eh) };
+    }
   });
   renderSchedWidget();
 }
@@ -1193,38 +1227,41 @@ function buildSchedForm(sched) {
 function renderSchedWidget() {
   const range = SCHED_RANGE_END - SCHED_RANGE_START;
 
-  // Build 7 chips
+  // 7 day chips
   const chips = DAYS.map(day => {
-    const d       = scheduleData[day];
-    const isFast  = !d.start;
-    const abbrev  = day.slice(0,3).toUpperCase();
-    const sel     = schedSelectedDay === day;
-
-    let barFill = '';
+    const d      = scheduleData[day];
+    const isFast = !d.start;
+    const sel    = schedSelectedDay === day;
+    let barFill  = '';
     if (!isFast) {
       const sM  = Math.max(SCHED_RANGE_START, timeToMins(d.start));
       const eM  = Math.min(SCHED_RANGE_END,   timeToMins(d.end));
       const top = ((sM - SCHED_RANGE_START) / range * 100).toFixed(1);
-      const ht  = Math.max(0, ((eM - sM) / range * 100)).toFixed(1);
+      const ht  = Math.max(2, ((eM - sM) / range * 100)).toFixed(1);
       barFill = `<div class="sched-bar-fill" style="top:${top}%;height:${ht}%"></div>`;
     }
-
     const lbl = isFast ? 'Fast' : `${fmtShort(d.start)}–${fmtShort(d.end)}`;
-
     return `<div class="sched-day-chip${isFast?' is-fasting':''}${sel?' is-selected':''}"
                  onclick="selectSchedDay('${day}')">
-      <div class="sched-chip-abbrev">${abbrev}</div>
+      <div class="sched-chip-abbrev">${day.slice(0,3).toUpperCase()}</div>
       <div class="sched-bar-track">${barFill}</div>
       <div class="sched-chip-label">${lbl}</div>
     </div>`;
   }).join('');
 
-  // Build detail panel for selected day
+  // Detail panel
   let detail = '';
   if (schedSelectedDay) {
     const d      = scheduleData[schedSelectedDay];
     const isFast = !d.start;
+    const startH = isFast ? 12 : (timeToHour(d.start, false) || 12);
+    const endH   = isFast ? 18 : (timeToHour(d.end,   true)  || 18);
     const dur    = windowDur(d.start, d.end);
+
+    const openOpts  = OPEN_HOURS.map(h =>
+      `<option value="${h}"${h===startH?' selected':''}>${hourLabel(h)}</option>`).join('');
+    const closeOpts = CLOSE_HOURS.filter(h => h > startH).map(h =>
+      `<option value="${h}"${h===endH?' selected':''}>${hourLabel(h)}</option>`).join('');
 
     detail = `
     <div class="sched-detail">
@@ -1241,14 +1278,12 @@ function renderSchedWidget() {
         <div class="sched-time-row">
           <div class="sched-time-field">
             <label>Window Opens</label>
-            <input type="time" class="time-input" value="${d.start||'12:00'}"
-                   onchange="updateSchedTime('${schedSelectedDay}','start',this.value)">
+            <select class="time-select" onchange="updateSchedHour('${schedSelectedDay}','start',+this.value)">${openOpts}</select>
           </div>
           <div class="sched-time-sep">→</div>
           <div class="sched-time-field">
             <label>Window Closes</label>
-            <input type="time" class="time-input" value="${d.end||'18:00'}"
-                   onchange="updateSchedTime('${schedSelectedDay}','end',this.value)">
+            <select class="time-select" onchange="updateSchedHour('${schedSelectedDay}','end',+this.value)">${closeOpts}</select>
           </div>
         </div>
         ${dur ? `<div class="sched-window-dur">${dur}</div>` : ''}
@@ -1272,32 +1307,18 @@ function toggleSchedDay(day, hasWindow) {
   renderSchedWidget();
 }
 
-function updateSchedTime(day, field, val) {
-  scheduleData[day][field] = val;
-  // Re-render just the chips strip (not detail) to avoid losing focus
-  const range = SCHED_RANGE_END - SCHED_RANGE_START;
-  document.querySelectorAll('.sched-day-chip').forEach((chip, i) => {
-    const d      = scheduleData[DAYS[i]];
-    const isFast = !d.start;
-    const track  = chip.querySelector('.sched-bar-track');
-    const lbl    = chip.querySelector('.sched-chip-label');
-    let fill = '';
-    if (!isFast) {
-      const sM = Math.max(SCHED_RANGE_START, timeToMins(d.start));
-      const eM = Math.min(SCHED_RANGE_END,   timeToMins(d.end));
-      const top = ((sM - SCHED_RANGE_START) / range * 100).toFixed(1);
-      const ht  = Math.max(0, ((eM - sM) / range * 100)).toFixed(1);
-      fill = `<div class="sched-bar-fill" style="top:${top}%;height:${ht}%"></div>`;
-    }
-    track.innerHTML = fill;
-    lbl.textContent = isFast ? 'Fast' : `${fmtShort(d.start)}–${fmtShort(d.end)}`;
-    // update duration label without full re-render
-    const durEl = document.querySelector('.sched-window-dur');
-    if (durEl) {
-      const dur = windowDur(scheduleData[day].start, scheduleData[day].end);
-      durEl.textContent = dur || '';
-    }
-  });
+function updateSchedHour(day, field, h) {
+  const d      = scheduleData[day];
+  const startH = timeToHour(d.start, false) || 12;
+  const endH   = timeToHour(d.end,   true)  || 18;
+  if (field === 'start') {
+    // Auto-bump end if it's no longer ≥1h ahead
+    const newEnd = endH <= h ? h + 1 : endH;
+    scheduleData[day] = { start: hourToTime(h), end: hourToTime(Math.min(24, newEnd)) };
+  } else {
+    scheduleData[day] = { start: d.start, end: hourToTime(h) };
+  }
+  renderSchedWidget();
 }
 
 async function saveSchedule() {
