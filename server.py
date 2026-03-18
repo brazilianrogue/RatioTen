@@ -490,12 +490,15 @@ def build_system_prompt(
 
     weekly_context = ""
     if weekly_summary:
-        header = "| Date | Calories | Protein | Density |\n|------|----------|---------|---------|"
-        rows_str = "\n".join(
-            f"| {r['date']} | {r['calories']} | {r['protein']} | {r['density']} |"
-            for r in weekly_summary
-        )
-        weekly_context = f"\n### ROLLING 7-DAY TREND:\n{header}\n{rows_str}"
+        today_str = now.strftime("%Y-%m-%d")
+        completed = [r for r in weekly_summary if r['date'] != today_str]
+        if completed:
+            header = "| Date | Calories | Protein | Density |\n|------|----------|---------|---------|"
+            rows_str = "\n".join(
+                f"| {r['date']} | {r['calories']} | {r['protein']} | {r['density']} |"
+                for r in completed
+            )
+            weekly_context = f"\n### ROLLING 7-DAY TREND (completed days only):\n{header}\n{rows_str}"
 
     return f"""
 ### CRITICAL: USER PREFERENCES & CONSTRAINTS (HIGHEST PRIORITY):
