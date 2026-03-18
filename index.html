@@ -151,6 +151,10 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .tl-start { left:0; top:50%; transform:translateY(-50%); }
 .tl-end   { right:0; top:50%; transform:translateY(-50%); }
 
+/* ── History timelines ────────────────────────────────────────────────── */
+.hist-day { margin-bottom: 36px; }
+.hist-day-label { font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+
 /* ── Chat ─────────────────────────────────────────────────────────────── */
 #chat-list {
   display:flex; flex-direction:column; gap:6px; padding-bottom:4px;
@@ -403,6 +407,12 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       Week over Week
     </div>
     <div style="position:relative;height:200px;margin-bottom:16px"><canvas id="chart-wow"></canvas></div>
+
+    <div class="section-hdr" style="margin-top:24px">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+      Previous 10 Days
+    </div>
+    <div id="history-timelines"></div>
   </div>
 
   <!-- PLAN VIEW -->
@@ -812,9 +822,80 @@ async function loadAnalyze() {
     renderEffectiveness(data.effectiveness);
     renderTrailing(data.trailing_7);
     renderCharts(data.trailing_7, data.wow);
+    renderHistoryTimelines(data.log_history || {}, data.schedule || {});
   } catch(e) {
     console.error('Analyze load error:', e);
   }
+}
+
+function renderHistoryTimelines(logHistory, schedule) {
+  const container = document.getElementById('history-timelines');
+  const today = new Date().toISOString().slice(0, 10);
+  const dates = Object.keys(logHistory)
+    .filter(d => d !== today)
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, 10);
+
+  if (dates.length === 0) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:8px 0">No historical data yet.</div>';
+    return;
+  }
+
+  let html = '';
+  for (const date of dates) {
+    const logs = logHistory[date];
+    const dt = new Date(date + 'T12:00:00');
+    const dayName = dt.toLocaleDateString('en-US', { weekday: 'long' });
+    const sched = schedule[dayName] || { start: null, end: null };
+    if (!sched.start || !sched.end) continue;
+
+    const [sh, sm] = sched.start.split(':').map(Number);
+    const [eh, em] = sched.end.split(':').map(Number);
+    const windowMins = (eh * 60 + em) - (sh * 60 + sm);
+    if (windowMins <= 0) continue;
+
+    // Compute position % for each log entry
+    const logsWithPos = logs.map(l => {
+      const [lh, lm] = l.timestamp.split(':').map(Number);
+      const pos = Math.max(0, Math.min(100, ((lh * 60 + lm) - (sh * 60 + sm)) / windowMins * 100));
+      return { ...l, pos_pct: pos };
+    });
+
+    // Cluster by position (within 3%)
+    const sorted = [...logsWithPos].sort((a, b) => a.pos_pct - b.pos_pct);
+    const clusters = [];
+    for (const log of sorted) {
+      if (clusters.length && Math.abs(log.pos_pct - clusters[clusters.length - 1].pos) < 3.0) {
+        clusters[clusters.length - 1].emojis.push(log.emoji);
+        clusters[clusters.length - 1].items.push(log.item);
+      } else {
+        clusters.push({ pos: log.pos_pct, emojis: [log.emoji], items: [log.item] });
+      }
+    }
+
+    let markers = '';
+    clusters.forEach((c, i) => {
+      const above = i % 2 === 0;
+      const laneOffset = 15 + Math.floor(i / 2) * 25;
+      const topStyle = above ? `bottom:calc(100% + ${laneOffset}px)` : `top:calc(100% + ${laneOffset}px)`;
+      const left = Math.max(0, Math.min(100, c.pos));
+      const xform = left < 5 ? 'translateX(0)' : left > 95 ? 'translateX(-100%)' : 'translateX(-50%)';
+      const badge = c.emojis.length > 1 ? `<span class="tl-badge">${c.emojis.length}</span>` : '';
+      markers += `<div class="tl-emoji" style="left:${left.toFixed(1)}%;${topStyle};transform:${xform}" title="${esc(c.items.join(', '))}">${c.emojis[0]}${badge}</div>`;
+    });
+
+    const dateLabel = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    html += `<div class="hist-day">
+      <div class="hist-day-label">${dateLabel}</div>
+      <div class="timeline-bar-outer">
+        <span class="tl-label tl-start">${sched.start}</span>
+        <span class="tl-label tl-end">${sched.end}</span>
+        ${markers}
+      </div>
+    </div>`;
+  }
+
+  container.innerHTML = html || '<div style="color:var(--muted);font-size:0.85rem;padding:8px 0">No historical data yet.</div>';
 }
 
 function renderEffectiveness(eff) {

@@ -870,6 +870,7 @@ async def analyze():
         "trailing_7":    trailing,
         "wow":           wow,
         "log_history":   history,
+        "schedule":      schedule,
     }
 
 
