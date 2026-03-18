@@ -584,7 +584,7 @@ def _make_chat_session(model_id: str, system_prompt: str, history: list):
     # Convert history to genai Content objects
     genai_history = []
     for msg in history:
-        role = msg["role"]
+        role = "model" if msg["role"] == "assistant" else msg["role"]
         parts = []
         for c in msg.get("content", []):
             if isinstance(c, str) and c.strip():
