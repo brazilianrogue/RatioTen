@@ -126,10 +126,12 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .status-label { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
 .status-timer { font-size: 1.0rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.eating   { background: rgba(0,201,122,0.08); border-color: rgba(0,201,122,0.2); }
-.fasting  { background: rgba(0,166,255,0.08); border-color: rgba(0,166,255,0.2); }
-.eating  .status-label  { color: var(--green); }
-.fasting .status-label  { color: var(--blue); }
+.eating      { background: rgba(0,201,122,0.08); border-color: rgba(0,201,122,0.2); }
+.fasting     { background: rgba(0,166,255,0.08); border-color: rgba(0,166,255,0.2); }
+.no-schedule { background: rgba(106,106,138,0.06); border-color: rgba(106,106,138,0.18); }
+.eating  .status-label      { color: var(--green); }
+.fasting .status-label      { color: var(--blue); }
+.no-schedule .status-label  { color: var(--muted); }
 
 /* ── Timeline ─────────────────────────────────────────────────────────── */
 #timeline-wrap { margin: 16px 0; }
@@ -404,6 +406,9 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   <input id="meal-input" type="text" placeholder="Describe your meal…" autocomplete="off" autocorrect="off">
   <input id="file-input" type="file" accept="image/*" capture="environment" style="display:none">
   <button class="icon-btn" id="cam-btn" onclick="document.getElementById('file-input').click()">📷</button>
+  <button class="icon-btn" id="send-btn" onclick="submitChat()" style="background:var(--accent);border-color:var(--accent)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#161821" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+  </button>
 </footer>
 
 <script>
@@ -434,14 +439,22 @@ function switchView(name) {
   } else {
     bar.classList.remove('visible');
   }
-  if (name === 'analyze' && !state.analyzeLoaded) loadAnalyze();
-  if (name === 'plan'    && !state.planLoaded)    loadPlan();
+  if (name === 'analyze') loadAnalyze();
+  if (name === 'plan' && !state.planLoaded) loadPlan();
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function fmt(n) { return Number(n).toLocaleString(); }
 
 function mdToHtml(text) {
+  // Strip JSON meal-log block (internal logging artifact, never show to user)
+  text = text.replace(/```json\s*\[[\s\S]*?\]\s*```/g, '').trim();
+  // Generic code fences → inline block
+  text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, '<code style="font-size:0.8rem;color:#a8d8a8;display:block;padding:4px 0;white-space:pre-wrap">$1</code>');
+  // Headings
+  text = text.replace(/^### (.+)$/gm, '<strong style="font-size:0.88rem;color:#d8d8e0;display:block;margin:6px 0 2px">$1</strong>');
+  text = text.replace(/^## (.+)$/gm,  '<strong style="font-size:0.95rem;color:#fff;display:block;margin:8px 0 2px">$1</strong>');
+  text = text.replace(/^# (.+)$/gm,   '<strong style="font-size:1rem;color:#fff;display:block;margin:8px 0 4px">$1</strong>');
   // Tables
   const tableRe = /(\|.+\|\n\|[-| :]+\|\n(?:\|.+\|\n?)*)/g;
   text = text.replace(tableRe, match => {
@@ -497,7 +510,9 @@ async function loadDashboard() {
     const timer  = document.getElementById('status-timer');
     state.fastingStatus = dash.fasting_status;
     state.targetTs      = dash.target_ts;
-    banner.className = dash.fasting_status === 'Eating Window Active' ? 'eating' : 'fasting';
+    banner.className = dash.fasting_status === 'Eating Window Active' ? 'eating'
+                     : dash.fasting_status === 'Fasting Active'      ? 'fasting'
+                     : 'no-schedule';
     lbl.textContent  = dash.fasting_status;
     startTimer();
 
@@ -767,12 +782,6 @@ function renderEffectiveness(eff) {
   const d = eff.drivers || {};
   const adRate = d.total_days > 0 ? Math.round((d.adherent_days / d.total_days) * 100) : 0;
   const logRate = d.logging_pct != null ? Math.round(d.logging_pct) : null;
-
-  function status(val, good, ok) {
-    if (val >= good) return ['Optimal',    's-optimal'];
-    if (val >= ok)   return ['Consistent', 's-moderate'];
-    return                  ['Needs Focus','s-poor'];
-  }
 
   const drivers = [
     { label: 'Protocol Success',   value: `${d.adherent_days || 0}/${d.total_days || 0} days`, ...statusObj(adRate, 85, 70) },
