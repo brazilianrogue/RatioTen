@@ -200,8 +200,20 @@ def _read_lowest_weight() -> Optional[float]:
         return None
 
 
+def _parse_weight_date(val: str) -> Optional[str]:
+    """Parse a weight log timestamp into a YYYY-MM-DD string, or None on failure."""
+    from datetime import datetime as _dt
+    s = str(val).strip()
+    for fmt in ("%m/%d/%Y %H:%M", "%m/%d/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return _dt.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
+
+
 def _read_weight_history() -> list:
-    """Returns last 30 weight entries as [{date, weight}], oldest first."""
+    """Returns up to 30 daily weight entries (one per day, lowest reading), oldest first."""
     try:
         sh = _get_sh()
         try:
@@ -211,16 +223,25 @@ def _read_weight_history() -> list:
         data = ws.get_all_records()
         if not data:
             return []
-        entries = []
+        daily: dict = {}  # date_str -> lowest weight seen that day
         for r in data:
-            date_val   = r.get("Date") or r.get("Timestamp") or r.get("date") or ""
+            ts_val     = r.get("Timestamp") or r.get("Date") or r.get("date") or ""
             weight_val = r.get("Weight (lbs)")
-            if date_val and weight_val:
-                try:
-                    entries.append({"date": str(date_val)[:10], "weight": float(weight_val)})
-                except (ValueError, TypeError):
-                    pass
-        entries.sort(key=lambda x: x["date"])
+            if not ts_val or not weight_val:
+                continue
+            try:
+                weight   = float(weight_val)
+                date_key = _parse_weight_date(ts_val)
+                if not date_key:
+                    continue
+                if date_key not in daily or weight < daily[date_key]:
+                    daily[date_key] = weight
+            except (ValueError, TypeError):
+                pass
+        entries = sorted(
+            [{"date": d, "weight": w} for d, w in daily.items()],
+            key=lambda x: x["date"],
+        )
         return entries[-30:]
     except Exception:
         return []
