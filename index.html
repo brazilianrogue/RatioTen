@@ -336,18 +336,25 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   margin-top:12px; text-align:center; font-size:0.8rem;
   color:rgba(0,166,255,0.65); letter-spacing:0.03em;
 }
-/* ── Daily Targets selects ────────────────────────────────────────────── */
+/* ── Daily Targets stepper ────────────────────────────────────────────── */
 .goals-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px; }
 .goals-grid .form-group { margin-bottom:0; }
-.form-select {
-  width:100%; background:var(--card); border:1px solid rgba(255,255,255,0.1);
-  border-radius:10px; color:#fff; padding:10px 14px; font-size:1rem; outline:none;
-  font-family:var(--font); appearance:none; -webkit-appearance:none; cursor:pointer;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(255,255,255,0.35)' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat:no-repeat; background-position:right 13px center; padding-right:34px;
+.stepper {
+  display:flex; align-items:stretch;
+  background:var(--card); border:1px solid rgba(255,255,255,0.1);
+  border-radius:10px; overflow:hidden;
 }
-.form-select:focus { border-color:rgba(255,255,255,0.25); }
-.form-select option { background:#1e2030; }
+.stepper-btn {
+  width:38px; border:none; background:transparent;
+  color:rgba(255,255,255,0.4); font-size:1.25rem; cursor:pointer;
+  flex-shrink:0; transition:color 0.15s, background 0.15s;
+  font-family:var(--font); line-height:1; padding:0;
+}
+.stepper-btn:active { background:rgba(255,255,255,0.08); color:#fff; }
+.stepper-val {
+  flex:1; text-align:center; font-size:0.9rem; font-weight:600; color:#fff;
+  user-select:none; padding:11px 4px; line-height:1.2;
+}
 .time-input {
   flex:1; background:var(--card); border:1px solid rgba(255,255,255,0.1);
   border-radius:8px; color:#fff; padding:6px 10px; font-size:0.9rem; outline:none;
@@ -632,11 +639,21 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
     <div class="goals-grid">
       <div class="form-group">
         <label class="form-label">Calorie Lid</label>
-        <select id="goal-cals" class="form-select"></select>
+        <div class="stepper">
+          <button class="stepper-btn" onclick="stepGoal('cals',-100)">−</button>
+          <span class="stepper-val" id="goal-cals-val">2,000 kcal</span>
+          <input type="hidden" id="goal-cals" value="2000">
+          <button class="stepper-btn" onclick="stepGoal('cals',100)">+</button>
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Protein Floor</label>
-        <select id="goal-prot" class="form-select"></select>
+        <div class="stepper">
+          <button class="stepper-btn" onclick="stepGoal('prot',-10)">−</button>
+          <span class="stepper-val" id="goal-prot-val">150g</span>
+          <input type="hidden" id="goal-prot" value="150">
+          <button class="stepper-btn" onclick="stepGoal('prot',10)">+</button>
+        </div>
       </div>
     </div>
     <div class="density-hint" id="density-hint">Target density: 10.0%</div>
@@ -1368,37 +1385,33 @@ function renderCharts(trailing, wow) {
 // ── Plan view ──────────────────────────────────────────────────────────────
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
-function buildSelectOptions() {
-  const calsEl = document.getElementById('goal-cals');
-  if (!calsEl.options.length) {
-    for (let c = 500; c <= 5000; c += 50) {
-      const opt = document.createElement('option');
-      opt.value = c;
-      opt.textContent = c.toLocaleString() + ' kcal';
-      calsEl.appendChild(opt);
-    }
-  }
-  const protEl = document.getElementById('goal-prot');
-  if (!protEl.options.length) {
-    for (let p = 20; p <= 500; p += 5) {
-      const opt = document.createElement('option');
-      opt.value = p;
-      opt.textContent = p + 'g';
-      protEl.appendChild(opt);
-    }
-  }
+const STEPPER_CFG = {
+  cals: { min:500,  max:5000, step:100, fmt: v => v.toLocaleString() + ' kcal' },
+  prot: { min:20,   max:500,  step:10,  fmt: v => v + 'g' },
+};
+
+function setGoalDisplay(id, val) {
+  const cfg = STEPPER_CFG[id];
+  val = Math.min(cfg.max, Math.max(cfg.min, val));
+  document.getElementById('goal-' + id).value = val;
+  document.getElementById('goal-' + id + '-val').textContent = cfg.fmt(val);
+}
+
+function stepGoal(id, delta) {
+  const inp = document.getElementById('goal-' + id);
+  setGoalDisplay(id, parseInt(inp.value) + delta);
+  updateDensityHint();
 }
 
 async function loadPlan() {
   state.planLoaded = true;
-  buildSelectOptions();
   try {
     const [goals, sched] = await Promise.all([
       fetch('/api/goals').then(r=>r.json()),
       fetch('/api/schedule').then(r=>r.json()),
     ]);
-    document.getElementById('goal-cals').value = goals.calories || 2000;
-    document.getElementById('goal-prot').value = goals.protein  || 150;
+    setGoalDisplay('cals', goals.calories || 2000);
+    setGoalDisplay('prot', goals.protein  || 150);
     updateDensityHint();
     buildSchedForm(sched);
   } catch(e) {}
@@ -1410,8 +1423,6 @@ function updateDensityHint() {
   const d    = (prot / cals * 100).toFixed(1);
   document.getElementById('density-hint').textContent = `Target density: ${d}%`;
 }
-document.getElementById('goal-cals').addEventListener('change', updateDensityHint);
-document.getElementById('goal-prot').addEventListener('change', updateDensityHint);
 
 async function saveGoals() {
   const btn = document.querySelector('#view-plan .save-btn');
