@@ -1198,7 +1198,17 @@ function renderCharts(trailing, wow) {
       },
       options: {
         responsive:true, maintainAspectRatio:false,
-        plugins: { legend:{ labels:{ color:'#d8d8e0', font:{size:11}, usePointStyle:false, boxWidth:12, boxHeight:12 } } },
+        plugins: { legend:{ labels:{ color:'#d8d8e0', font:{size:11}, usePointStyle:false, boxWidth:12, boxHeight:12,
+          generateLabels(chart) {
+            const labels = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+            labels.forEach(l => {
+              l.lineWidth = 1;
+              if (l.strokeStyle === '#fca311') l.fillStyle = 'rgba(252,163,17,0.5)';
+              if (l.strokeStyle === '#00A6FF') l.fillStyle = 'rgba(0,166,255,0.5)';
+            });
+            return labels;
+          }
+        } } },
         scales: {
           x: { ticks:{ color:'#6a6a8a', font:{size:10} }, grid:{ color:'rgba(255,255,255,0.04)' } },
           y:  { ticks:{ color:'#fca311', font:{size:10} }, grid:{ color:'rgba(255,255,255,0.04)' } },
