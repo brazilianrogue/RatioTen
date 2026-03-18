@@ -923,8 +923,9 @@ function renderEffectiveness(eff) {
   const score    = parseFloat(eff.score);
   const fraction = Math.max(0, Math.min(1, (score - 1) / 9));
   setGauge(fraction);
-  scoreText.textContent = score.toFixed(1);
-  scoreText.setAttribute('fill', '#00A6FF');
+  const isPerfect = score >= 10;
+  scoreText.textContent = isPerfect ? '10' : score.toFixed(1);
+  scoreText.setAttribute('fill', isPerfect ? '#fca311' : '#00A6FF');
   scoreText.setAttribute('filter', 'url(#text-glow)');
 
   const d = eff.drivers || {};
