@@ -171,8 +171,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .bubble p { margin:0 0 4px; }
 .bubble p:last-child { margin:0; }
 .bubble table { border-collapse:collapse; width:100%; font-size:0.82rem; margin:6px 0; }
-.bubble th { padding:4px 7px; color:#a0a0b0; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left; font-weight:600; }
+.bubble th { padding:4px 7px; color:#a0a0b0; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left; font-weight:600; white-space:nowrap; }
 .bubble td { padding:3px 7px; border-bottom:1px solid rgba(255,255,255,0.04); color:#c8c8d4; }
+.bubble td:not(:first-child) { white-space:nowrap; }
 .typing { opacity:0.5; font-style:italic; }
 #chat-empty { color:var(--muted); font-size:0.8rem; text-align:center; padding:24px 0; }
 
@@ -518,7 +519,7 @@ async function loadDashboard() {
 
     // Record low
     const rl = document.getElementById('record-low');
-    rl.textContent = dash.lowest_weight ? `🏆 ${dash.lowest_weight} lbs` : '';
+    rl.textContent = dash.lowest_weight ? `🏆 ${parseFloat(dash.lowest_weight).toFixed(1)} lbs` : '';
 
     // Metric cards
     const goals = dash.goals;
@@ -787,7 +788,7 @@ function renderEffectiveness(eff) {
     { label: 'Protocol Success',   value: `${d.adherent_days || 0}/${d.total_days || 0} days`, ...statusObj(adRate, 85, 70) },
     { label: 'Avg Density',        value: `${(d.avg_density||0).toFixed(1)}%`,                 ...statusObj(d.avg_density||0, 10.5, 9.5) },
     { label: 'Weight Trend',       value: `${(d.weight_shift||0) > 0 ? '-' : '+'}${Math.abs(d.weight_shift||0).toFixed(1)} lbs`, ...statusObj(d.weight_shift||0, 0.8, 0) },
-    { label: 'Log Consistency',    value: logRate != null ? `${logRate}%` : '—',               ...statusObj(logRate||0, 80, 60) },
+    { label: 'Log Consistency',    value: logRate != null ? `${logRate}%` : '—',               ...(logRate != null ? statusObj(logRate, 80, 60) : { label_s: 'No Data', cls: '' }) },
   ];
 
   grid.innerHTML = drivers.map(dr => `
