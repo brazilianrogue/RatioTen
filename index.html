@@ -68,8 +68,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
 /* ── Scrollable main ──────────────────────────────────────────────────── */
 #content {
-  height: 100dvh;
-  padding-top:    calc(var(--nav-h) + env(safe-area-inset-top, 0px));
+  position: fixed;
+  top:    calc(var(--nav-h) + env(safe-area-inset-top, 0px));
+  bottom: 0; left: 0; right: 0;
   padding-bottom: calc(var(--bar-h) + env(safe-area-inset-bottom, 0px) + 8px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -86,7 +87,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   border-top: 1px solid var(--border);
   display: none; /* shown only in Log view */
 }
-#input-bar.visible { display: flex; align-items: center; padding: 6px 10px; gap: 8px; }
+#input-bar.visible {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 10px);
+}
 #meal-input {
   flex: 1; height: 46px; background: var(--card); border: 1px solid rgba(255,255,255,0.1);
   border-radius: 24px; color: #fff; padding: 0 18px; font-size: 1rem; outline: none;
