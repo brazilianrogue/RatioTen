@@ -191,9 +191,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .section-hdr svg { stroke:var(--accent); width:18px; height:18px; }
 
 /* ── Analyze view ─────────────────────────────────────────────────────── */
-.gauge-wrap { text-align:center; margin:8px 0 16px; }
-.score-big { font-size:3rem; font-weight:800; color:var(--accent); }
-.score-sub { font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+.gauge-wrap { margin:4px 0 12px; }
+#gauge-fill   { transition: stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1), stroke 0.3s ease; }
+#gauge-needle { transform-origin: 110px 115px; transition: transform 0.9s cubic-bezier(0.4,0,0.2,1); }
 .driver-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px; }
 .driver-card { background:var(--card2); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
 .driver-label { font-size:0.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
@@ -332,8 +332,43 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   <!-- ANALYZE VIEW -->
   <div id="view-analyze" class="view">
     <div class="gauge-wrap">
-      <div class="score-big" id="score-val">—</div>
-      <div class="score-sub">Plan Effectiveness Score</div>
+      <!-- cx=110 cy=115 r=85  |  circumference=267.04  |  CCW arc = top semicircle -->
+      <!-- Zone boundaries: score4→angle120°→(67.5,41.4)  score7→angle60°→(152.5,41.4) -->
+      <svg id="gauge-svg" viewBox="0 0 220 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Dim zone backgrounds -->
+        <path d="M 25 115 A 85 85 0 0 0 67.5 41.4"   stroke="rgba(220,53,69,0.22)"  stroke-width="14" stroke-linecap="butt"/>
+        <path d="M 67.5 41.4 A 85 85 0 0 0 152.5 41.4" stroke="rgba(252,163,17,0.22)" stroke-width="14" stroke-linecap="butt"/>
+        <path d="M 152.5 41.4 A 85 85 0 0 0 195 115" stroke="rgba(0,201,122,0.22)"  stroke-width="14" stroke-linecap="butt"/>
+        <!-- Zone divider ticks (radial lines across the track) -->
+        <line x1="71" y1="47.5" x2="64" y2="35.3" stroke="rgba(14,17,23,0.85)" stroke-width="2.5"/>
+        <line x1="149" y1="47.5" x2="156" y2="35.3" stroke="rgba(14,17,23,0.85)" stroke-width="2.5"/>
+        <!-- Fill arc: starts at left (score 1), grows rightward (score 10) -->
+        <path id="gauge-fill" d="M 25 115 A 85 85 0 0 0 195 115"
+              stroke="#fca311" stroke-width="14" stroke-linecap="round"
+              stroke-dasharray="267.04" stroke-dashoffset="267.04"/>
+        <!-- Needle: points right at 0°, rotated by JS; transform-origin set in CSS -->
+        <line id="gauge-needle" x1="110" y1="115" x2="186" y2="115"
+              stroke="rgba(255,255,255,0.92)" stroke-width="2.5" stroke-linecap="round"
+              style="transform:rotate(-180deg)"/>
+        <!-- Pivot -->
+        <circle cx="110" cy="115" r="5.5" fill="#fff"/>
+        <circle cx="110" cy="115" r="2.5" fill="var(--bg)"/>
+        <!-- Score value -->
+        <text id="gauge-score-text" x="110" y="86" text-anchor="middle"
+              font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+              font-size="30" font-weight="800" fill="#fca311">—</text>
+        <!-- Sub-label -->
+        <text x="110" y="100" text-anchor="middle"
+              font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+              font-size="8" fill="rgba(255,255,255,0.32)" letter-spacing="1">PLAN EFFECTIVENESS</text>
+        <!-- Min / max labels -->
+        <text x="18" y="128" text-anchor="middle"
+              font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+              font-size="9" fill="rgba(255,255,255,0.28)">1</text>
+        <text x="202" y="128" text-anchor="middle"
+              font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+              font-size="9" fill="rgba(255,255,255,0.28)">10</text>
+      </svg>
     </div>
 
     <div class="driver-grid" id="driver-grid"></div>
@@ -768,20 +803,34 @@ async function loadAnalyze() {
 }
 
 function renderEffectiveness(eff) {
-  const scoreEl = document.getElementById('score-val');
-  const grid    = document.getElementById('driver-grid');
-  const tip     = document.getElementById('coach-tip');
+  const fillEl    = document.getElementById('gauge-fill');
+  const needleEl  = document.getElementById('gauge-needle');
+  const scoreText = document.getElementById('gauge-score-text');
+  const grid      = document.getElementById('driver-grid');
+  const tip       = document.getElementById('coach-tip');
+  const C         = Math.PI * 85; // semicircle circumference ≈ 267.04
+
+  function setGauge(fraction, color) {
+    fillEl.style.stroke = color;
+    fillEl.style.strokeDashoffset = C * (1 - fraction);
+    needleEl.style.transform = `rotate(${-(fraction * 180)}deg)`;
+  }
 
   if (eff.error || !eff.score) {
-    scoreEl.textContent = '—';
-    scoreEl.style.color = 'var(--muted)';
+    setGauge(0, 'var(--muted)');
+    scoreText.textContent = '—';
+    scoreText.setAttribute('fill', 'var(--muted)');
     grid.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);font-size:0.85rem">${esc(eff.error || 'Not enough data yet (need 7+ days).')}</div>`;
+    tip.style.display = 'none';
     return;
   }
 
-  const score = parseFloat(eff.score).toFixed(1);
-  scoreEl.textContent = score;
-  scoreEl.style.color = score >= 8 ? 'var(--green)' : score >= 5 ? 'var(--accent)' : 'var(--red)';
+  const score    = parseFloat(eff.score);
+  const fraction = Math.max(0, Math.min(1, (score - 1) / 9));
+  const color    = score >= 8 ? '#00c97a' : score >= 5 ? '#fca311' : '#dc3545';
+  setGauge(fraction, color);
+  scoreText.textContent = score.toFixed(1);
+  scoreText.setAttribute('fill', color);
 
   const d = eff.drivers || {};
   const adRate = d.total_days > 0 ? Math.round((d.adherent_days / d.total_days) * 100) : 0;
