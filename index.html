@@ -163,7 +163,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .hist-day-label { font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
 /* Wrapper reserves space so emoji overflow stays inside the card border */
-.hist-tl-wrap { padding-top:50px; padding-bottom:40px; }
+/* Max stem = 32px + ~24px emoji = 56px — padding must exceed this */
+.hist-tl-wrap { padding-top:60px; padding-bottom:50px; }
 .hist-tl-wrap .timeline-bar-outer { margin:0; }
 
 /* ── Chat ─────────────────────────────────────────────────────────────── */
@@ -743,16 +744,42 @@ function clusterLogs(logsWithPos) {
 
 function buildMarkers(clusters) {
   let markers = '';
+  // Collision-based lane assignment — stems are capped, never grow unboundedly with index
+  const STEM_BASE = 12;   // px for lane 0 (tight to bar)
+  const STEM_STEP = 20;   // additional px per extra lane
+  const MAX_LANES = 2;
+  const MIN_GAP   = 10;   // % gap before a lane is considered free again
+
+  // lastX[dir][lane] = rightmost X% placed in that slot
+  const lastX = { above: Array(MAX_LANES).fill(-999), below: Array(MAX_LANES).fill(-999) };
+
   clusters.forEach((c, i) => {
-    const above   = i % 2 === 0;
-    const stemH   = 14 + Math.floor(i / 2) * 14; // 14px base, +14px per extra lane
-    const left    = Math.max(0, Math.min(100, c.pos));
-    const xform   = left < 5 ? 'translateX(0)' : left > 95 ? 'translateX(-100%)' : 'translateX(-50%)';
-    const badge   = c.emojis.length > 1 ? `<span class="tl-badge">${c.emojis.length}</span>` : '';
-    const pos     = above ? 'bottom:100%' : 'top:100%';
-    const eSpan   = `<span style="position:relative;display:inline-block">${c.emojis[0]}${badge}</span>`;
-    const sSpan   = `<span class="tl-stem" style="height:${stemH}px"></span>`;
-    const inner   = above ? `${eSpan}${sSpan}` : `${sSpan}${eSpan}`;
+    const left   = Math.max(0, Math.min(100, c.pos));
+    const prefer = i % 2 === 0 ? 'above' : 'below';
+    const other  = prefer === 'above' ? 'below' : 'above';
+
+    // Find shallowest free lane (prefer → other direction, lane 0 → lane 1)
+    let chosenDir  = prefer;
+    let chosenLane = MAX_LANES - 1;  // fallback: deepest lane
+    outer:
+    for (const dir of [prefer, other]) {
+      for (let l = 0; l < MAX_LANES; l++) {
+        if (left - lastX[dir][l] > MIN_GAP) {
+          chosenDir = dir; chosenLane = l;
+          break outer;
+        }
+      }
+    }
+    lastX[chosenDir][chosenLane] = left;
+
+    const stemH  = STEM_BASE + chosenLane * STEM_STEP;
+    const above  = chosenDir === 'above';
+    const xform  = left < 5 ? 'translateX(0)' : left > 95 ? 'translateX(-100%)' : 'translateX(-50%)';
+    const badge  = c.emojis.length > 1 ? `<span class="tl-badge">${c.emojis.length}</span>` : '';
+    const pos    = above ? 'bottom:100%' : 'top:100%';
+    const eSpan  = `<span style="position:relative;display:inline-block">${c.emojis[0]}${badge}</span>`;
+    const sSpan  = `<span class="tl-stem" style="height:${stemH}px"></span>`;
+    const inner  = above ? `${eSpan}${sSpan}` : `${sSpan}${eSpan}`;
     markers += `<div class="tl-emoji" style="left:${left.toFixed(1)}%;${pos};transform:${xform}" title="${esc(c.items.join(', '))}">${inner}</div>`;
   });
   return markers;
