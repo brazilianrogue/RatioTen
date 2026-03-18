@@ -152,7 +152,10 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .tl-end   { right:0; top:50%; transform:translateY(-50%); }
 
 /* ── Chat ─────────────────────────────────────────────────────────────── */
-#chat-list { display:flex; flex-direction:column; gap:6px; padding-bottom:4px; }
+#chat-list {
+  display:flex; flex-direction:column; gap:6px; padding-bottom:4px;
+  max-height:55vh; overflow-y:auto; -webkit-overflow-scrolling:touch;
+}
 .bubble-row { display:flex; }
 .bubble-row.user { justify-content:flex-end; }
 .bubble-row.assistant { justify-content:flex-start; }
@@ -664,8 +667,8 @@ function appendBubble(role, text, streaming = false) {
 }
 
 function scrollChat() {
-  const content = document.getElementById('content');
-  content.scrollTop = content.scrollHeight;
+  const list = document.getElementById('chat-list');
+  list.scrollTop = list.scrollHeight;
 }
 
 // ── Chat submit ────────────────────────────────────────────────────────────
