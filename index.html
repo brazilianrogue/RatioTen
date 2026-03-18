@@ -356,8 +356,8 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
             <stop offset="100%" stop-color="#00A6FF"/>
           </linearGradient>
           <!-- Glow blur filter -->
-          <filter id="arc-glow" x="-30%" y="-30%" width="160%" height="160%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
+          <filter id="arc-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
             <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
           <filter id="text-glow" x="-30%" y="-30%" width="160%" height="160%">
@@ -365,17 +365,17 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
             <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
         </defs>
-        <!-- Background track -->
+        <!-- Background track hairline -->
         <path d="M 25 115 A 85 85 0 0 1 195 115"
-              stroke="rgba(0,166,255,0.08)" stroke-width="3" stroke-linecap="butt"/>
-        <!-- Glow layer (wider blurred duplicate, opacity driven by JS) -->
+              stroke="rgba(0,166,255,0.10)" stroke-width="1" stroke-linecap="butt"/>
+        <!-- Glow layer — same width as fill so it bleeds outward evenly, not rings -->
         <path id="gauge-glow" d="M 25 115 A 85 85 0 0 1 195 115"
-              stroke="#00A6FF" stroke-width="7" stroke-linecap="butt"
+              stroke="#00A6FF" stroke-width="5" stroke-linecap="butt"
               stroke-dasharray="267.04" stroke-dashoffset="267.04"
               filter="url(#arc-glow)" opacity="0"/>
         <!-- Fill arc with dark→electric blue gradient -->
         <path id="gauge-fill" d="M 25 115 A 85 85 0 0 1 195 115"
-              stroke="url(#arc-grad)" stroke-width="3" stroke-linecap="butt"
+              stroke="url(#arc-grad)" stroke-width="5" stroke-linecap="butt"
               stroke-dasharray="267.04" stroke-dashoffset="267.04"/>
         <!-- Score value -->
         <text id="gauge-score-text" x="110" y="86" text-anchor="middle"
