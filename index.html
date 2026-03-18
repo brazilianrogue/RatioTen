@@ -851,6 +851,8 @@ async function loadDashboard() {
     // Store weight data for Stats page card
     state.lowestWeight  = dash.lowest_weight || null;
     state.weightHistory = dash.weight_history || [];
+    // Re-render sparkline if Stats was already loaded with stale/empty data
+    if (state.analyzeLoaded && state.weightHistory.length >= 2) renderWeightCard();
 
     // Record low in status banner (right side)
     if (dash.lowest_weight) {

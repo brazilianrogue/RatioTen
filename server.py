@@ -54,12 +54,15 @@ if STATIC_DIR.exists():
 _cache: dict[str, tuple] = {}  # key → (value, expires_at)
 
 
-def _cached(key: str, ttl: int, fn):
+def _cached(key: str, ttl: int, fn, empty_ttl: int = 0):
+    """Cache fn() for ttl seconds.  If the result is falsy and empty_ttl > 0,
+    use empty_ttl instead so transient failures retry quickly."""
     entry = _cache.get(key)
     if entry and entry[1] > time.time():
         return entry[0]
     val = fn()
-    _cache[key] = (val, time.time() + ttl)
+    actual_ttl = (empty_ttl if (empty_ttl and not val) else ttl)
+    _cache[key] = (val, time.time() + actual_ttl)
     return val
 
 
@@ -243,7 +246,8 @@ def _read_weight_history() -> list:
             key=lambda x: x["date"],
         )
         return entries[-30:]
-    except Exception:
+    except Exception as e:
+        log.warning("_read_weight_history failed: %s", e)
         return []
 
 
@@ -708,8 +712,8 @@ async def dashboard():
     schedule       = _cached("schedule",       600,  _read_fasting_schedule)
     goals          = _cached("goals",          600,  _read_user_goals)
     today_logs     = _cached("today_logs",      60,  _read_today_logs)
-    lowest_weight  = _cached("lowest_weight", 3600,  _read_lowest_weight)
-    weight_history = _cached("weight_history", 3600, _read_weight_history)
+    lowest_weight  = _cached("lowest_weight", 3600,  _read_lowest_weight,  empty_ttl=30)
+    weight_history = _cached("weight_history", 3600, _read_weight_history, empty_ttl=30)
 
     # Today's totals
     cals    = sum(l["calories"] for l in today_logs)
@@ -968,3 +972,34 @@ async def effectiveness_sync():
         lambda: sync_plan_effectiveness_logs(force_resync=True, goals=goals, fasting=schedule)
     )
     return {"ok": True}
+
+
+@app.get("/api/debug/weight")
+async def debug_weight():
+    """Temporary debug endpoint — shows raw Weight_Logs sheet state."""
+    try:
+        sh = _get_sh()
+        try:
+            ws = sh.worksheet(WS_WEIGHT_LOGS)
+        except Exception as e:
+            return {"error": f"worksheet not found: {e}", "ws_name": WS_WEIGHT_LOGS}
+        raw = ws.get_all_records()
+        # Show column headers and first/last few rows
+        headers = list(raw[0].keys()) if raw else []
+        sample  = raw[:3] + (raw[-3:] if len(raw) > 6 else [])
+        # Also run the actual parse so we can see what's produced
+        _invalidate("weight_history")
+        _invalidate("lowest_weight")
+        parsed_history = _read_weight_history()
+        parsed_lowest  = _read_lowest_weight()
+        return {
+            "ws_name":        WS_WEIGHT_LOGS,
+            "row_count":      len(raw),
+            "headers":        headers,
+            "sample_rows":    sample,
+            "parsed_history": parsed_history,
+            "parsed_lowest":  parsed_lowest,
+            "parse_count":    len(parsed_history),
+        }
+    except Exception as e:
+        return {"error": str(e)}
