@@ -355,6 +355,85 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   flex:1; text-align:center; font-size:0.9rem; font-weight:600; color:#fff;
   user-select:none; padding:11px 4px; line-height:1.2;
 }
+.decide-link {
+  display:inline-block; font-size:0.75rem; color:var(--blue);
+  text-decoration:none; margin-top:2px; cursor:pointer; border:none;
+  background:none; padding:0; font-family:var(--font);
+}
+.decide-link:hover { text-decoration:underline; }
+/* ── Help Me Decide modal ─────────────────────────────────────────────── */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.65);
+  display:flex; align-items:center; justify-content:center;
+  z-index:200; padding:16px; backdrop-filter:blur(3px);
+}
+.modal-overlay.hidden { display:none; }
+.modal-card {
+  background:var(--card2); border:1px solid rgba(255,255,255,0.1);
+  border-radius:18px; padding:22px 20px 20px; width:100%; max-width:400px;
+  max-height:90vh; overflow-y:auto;
+}
+.modal-hdr {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:20px;
+}
+.modal-title { font-size:1rem; font-weight:700; }
+.modal-close {
+  width:28px; height:28px; border-radius:50%; border:none;
+  background:rgba(255,255,255,0.07); color:var(--muted);
+  font-size:1.1rem; cursor:pointer; display:flex; align-items:center;
+  justify-content:center; flex-shrink:0; line-height:1;
+}
+.modal-close:active { background:rgba(255,255,255,0.14); }
+.modal-section-lbl {
+  font-size:0.72rem; color:var(--muted); text-transform:uppercase;
+  letter-spacing:.06em; margin-bottom:8px; display:block;
+}
+.goal-opts { display:flex; flex-direction:column; gap:7px; margin-bottom:18px; }
+.goal-opt {
+  display:flex; align-items:center; gap:10px; padding:10px 12px;
+  border-radius:10px; border:1px solid rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.03); cursor:pointer;
+  transition:border-color 0.15s, background 0.15s;
+}
+.goal-opt:has(input:checked) {
+  border-color:rgba(252,163,17,0.5); background:rgba(252,163,17,0.07);
+}
+.goal-opt input[type=radio] { display:none; }
+.goal-opt-dot {
+  width:16px; height:16px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.25);
+  flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  transition:border-color 0.15s;
+}
+.goal-opt:has(input:checked) .goal-opt-dot {
+  border-color:var(--accent); background:var(--accent);
+  box-shadow:0 0 0 3px rgba(252,163,17,0.2);
+}
+.goal-opt:has(input:checked) .goal-opt-dot::after {
+  content:''; width:6px; height:6px; border-radius:50%; background:#161821;
+}
+.goal-opt-lbl { font-size:0.9rem; }
+.decide-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }
+.decide-field { display:flex; flex-direction:column; gap:5px; }
+.decide-field.full { grid-column:1/-1; }
+.decide-input {
+  background:var(--card); border:1px solid rgba(255,255,255,0.1);
+  border-radius:8px; color:#fff; padding:9px 11px; font-size:0.95rem;
+  outline:none; font-family:var(--font); width:100%; box-sizing:border-box;
+}
+.decide-input:focus { border-color:rgba(255,255,255,0.25); }
+.sex-toggle { display:flex; gap:6px; }
+.sex-btn {
+  flex:1; padding:9px; border-radius:8px; border:1px solid rgba(255,255,255,0.1);
+  background:var(--card); color:var(--muted); font-size:0.85rem; cursor:pointer;
+  font-family:var(--font); transition:all 0.15s;
+}
+.sex-btn.active {
+  border-color:rgba(252,163,17,0.5); background:rgba(252,163,17,0.1); color:#fff;
+}
+.height-wrap { display:flex; gap:6px; align-items:center; }
+.height-wrap .decide-input { flex:1; }
+.height-lbl { font-size:0.8rem; color:var(--muted); flex-shrink:0; }
 .time-input {
   flex:1; background:var(--card); border:1px solid rgba(255,255,255,0.1);
   border-radius:8px; color:#fff; padding:6px 10px; font-size:0.9rem; outline:none;
@@ -657,7 +736,8 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       </div>
     </div>
     <div class="density-hint" id="density-hint">Target density: 10.0%</div>
-    <button class="save-btn" onclick="saveGoals()">Save Targets</button>
+    <button class="decide-link" onclick="openDecideModal()">Help me decide →</button>
+    <button class="save-btn" onclick="saveGoals()" style="margin-top:10px">Save Targets</button>
     <div class="save-msg" id="goals-msg"></div>
 
     <div class="section-hdr" style="margin-top:24px">
@@ -684,6 +764,65 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   </div>
 
 </main>
+
+<!-- ── Help Me Decide modal ─────────────────────────────────────────────── -->
+<div id="decide-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeDecideModal()">
+  <div class="modal-card">
+    <div class="modal-hdr">
+      <span class="modal-title">Help Me Decide</span>
+      <button class="modal-close" onclick="closeDecideModal()">×</button>
+    </div>
+
+    <span class="modal-section-lbl">I'm looking to</span>
+    <div class="goal-opts">
+      <label class="goal-opt">
+        <input type="radio" name="decide-goal" value="lose" checked>
+        <div class="goal-opt-dot"></div>
+        <span class="goal-opt-lbl">Lose weight primarily</span>
+      </label>
+      <label class="goal-opt">
+        <input type="radio" name="decide-goal" value="muscle">
+        <div class="goal-opt-dot"></div>
+        <span class="goal-opt-lbl">Add muscle primarily</span>
+      </label>
+      <label class="goal-opt">
+        <input type="radio" name="decide-goal" value="both">
+        <div class="goal-opt-dot"></div>
+        <span class="goal-opt-lbl">Both if possible</span>
+      </label>
+    </div>
+
+    <div class="decide-fields">
+      <div class="decide-field full">
+        <span class="modal-section-lbl">Biological sex</span>
+        <div class="sex-toggle">
+          <button class="sex-btn active" id="sex-male" onclick="setSex('male')">Male</button>
+          <button class="sex-btn" id="sex-female" onclick="setSex('female')">Female</button>
+        </div>
+      </div>
+      <div class="decide-field full">
+        <span class="modal-section-lbl">Height</span>
+        <div class="height-wrap">
+          <input type="number" id="decide-ft" class="decide-input" min="3" max="8" placeholder="5" style="max-width:70px">
+          <span class="height-lbl">ft</span>
+          <input type="number" id="decide-in" class="decide-input" min="0" max="11" placeholder="10" style="max-width:70px">
+          <span class="height-lbl">in</span>
+        </div>
+      </div>
+      <div class="decide-field">
+        <span class="modal-section-lbl">Age</span>
+        <input type="number" id="decide-age" class="decide-input" min="14" max="100" placeholder="30">
+      </div>
+      <div class="decide-field">
+        <span class="modal-section-lbl">Weight (lbs)</span>
+        <input type="number" id="decide-weight" class="decide-input" min="80" max="500" placeholder="170">
+      </div>
+    </div>
+
+    <div id="decide-error" style="font-size:0.8rem;color:var(--red);margin-bottom:10px;display:none"></div>
+    <button class="save-btn" onclick="calcAndSet()">Calculate and Set</button>
+  </div>
+</div>
 
 <!-- ── Fixed input bar ───────────────────────────────────────────────────── -->
 <footer id="input-bar">
@@ -1387,6 +1526,71 @@ function renderCharts(trailing, wow) {
 // ── Plan view ──────────────────────────────────────────────────────────────
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
+// ── Help Me Decide modal ───────────────────────────────────────────────────
+let _decideSex = 'male';
+
+function openDecideModal() {
+  document.getElementById('decide-modal').classList.remove('hidden');
+  document.getElementById('decide-error').style.display = 'none';
+}
+function closeDecideModal() {
+  document.getElementById('decide-modal').classList.add('hidden');
+}
+function setSex(s) {
+  _decideSex = s;
+  document.getElementById('sex-male').classList.toggle('active', s === 'male');
+  document.getElementById('sex-female').classList.toggle('active', s === 'female');
+}
+
+function calcAndSet() {
+  const weightLbs = parseFloat(document.getElementById('decide-weight').value);
+  const ft        = parseFloat(document.getElementById('decide-ft').value) || 0;
+  const inches    = parseFloat(document.getElementById('decide-in').value) || 0;
+  const age       = parseFloat(document.getElementById('decide-age').value);
+  const goal      = document.querySelector('input[name="decide-goal"]:checked').value;
+
+  const errEl = document.getElementById('decide-error');
+  if (!weightLbs || !age || (!ft && !inches)) {
+    errEl.textContent = 'Please fill in weight, height, and age.';
+    errEl.style.display = 'block';
+    return;
+  }
+  errEl.style.display = 'none';
+
+  // Mifflin-St Jeor BMR
+  const weightKg  = weightLbs / 2.205;
+  const heightCm  = (ft * 12 + inches) * 2.54;
+  const bmr = _decideSex === 'female'
+    ? 10 * weightKg + 6.25 * heightCm - 5 * age - 161
+    : 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+  const tdee = bmr * 1.45; // lightly-to-moderately active
+
+  let targetCals, targetProt;
+  if (goal === 'lose') {
+    // ~600 kcal deficit → ~1.2 lbs/week loss; high protein preserves muscle
+    targetCals = Math.max(1200, Math.round((tdee - 600) / 100) * 100);
+    targetProt = Math.round(weightLbs / 10) * 10;        // 1 g/lb
+  } else if (goal === 'muscle') {
+    // ~300 kcal surplus for lean bulk; moderate protein sufficient with surplus
+    targetCals = Math.round((tdee + 300) / 100) * 100;
+    targetProt = Math.round(weightLbs * 0.8 / 10) * 10; // 0.8 g/lb
+  } else {
+    // Recomp: near-maintenance slight deficit; very high protein drives simultaneous changes
+    targetCals = Math.round((tdee - 150) / 100) * 100;
+    targetProt = Math.round(weightLbs * 1.1 / 10) * 10; // 1.1 g/lb
+  }
+
+  // Clamp to stepper ranges
+  targetCals = Math.min(5000, Math.max(500,  targetCals));
+  targetProt = Math.min(500,  Math.max(20,   targetProt));
+
+  setGoalDisplay('cals', targetCals);
+  setGoalDisplay('prot', targetProt);
+  updateDensityHint();
+  closeDecideModal();
+}
+
+// ── Stepper ────────────────────────────────────────────────────────────────
 const STEPPER_CFG = {
   cals: { min:500,  max:5000, step:100, fmt: v => v.toLocaleString() + ' kcal' },
   prot: { min:20,   max:500,  step:10,  fmt: v => v + 'g' },
