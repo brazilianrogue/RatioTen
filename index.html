@@ -332,18 +332,18 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   <!-- ANALYZE VIEW -->
   <div id="view-analyze" class="view">
     <div class="gauge-wrap">
-      <!-- cx=110 cy=115 r=85  |  circumference=267.04  |  CCW arc = top semicircle -->
+      <!-- cx=110 cy=115 r=85  |  circumference=267.04  |  CW (sweep=1) = arcs through top -->
       <!-- Zone boundaries: score4→angle120°→(67.5,41.4)  score7→angle60°→(152.5,41.4) -->
       <svg id="gauge-svg" viewBox="0 0 220 130" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <!-- Dim zone backgrounds -->
-        <path d="M 25 115 A 85 85 0 0 0 67.5 41.4"   stroke="rgba(220,53,69,0.22)"  stroke-width="14" stroke-linecap="butt"/>
-        <path d="M 67.5 41.4 A 85 85 0 0 0 152.5 41.4" stroke="rgba(252,163,17,0.22)" stroke-width="14" stroke-linecap="butt"/>
-        <path d="M 152.5 41.4 A 85 85 0 0 0 195 115" stroke="rgba(0,201,122,0.22)"  stroke-width="14" stroke-linecap="butt"/>
+        <!-- Dim zone backgrounds (sweep=1 = CW = arch through top) -->
+        <path d="M 25 115 A 85 85 0 0 1 67.5 41.4"   stroke="rgba(220,53,69,0.22)"  stroke-width="14" stroke-linecap="butt"/>
+        <path d="M 67.5 41.4 A 85 85 0 0 1 152.5 41.4" stroke="rgba(252,163,17,0.22)" stroke-width="14" stroke-linecap="butt"/>
+        <path d="M 152.5 41.4 A 85 85 0 0 1 195 115" stroke="rgba(0,201,122,0.22)"  stroke-width="14" stroke-linecap="butt"/>
         <!-- Zone divider ticks (radial lines across the track) -->
         <line x1="71" y1="47.5" x2="64" y2="35.3" stroke="rgba(14,17,23,0.85)" stroke-width="2.5"/>
         <line x1="149" y1="47.5" x2="156" y2="35.3" stroke="rgba(14,17,23,0.85)" stroke-width="2.5"/>
         <!-- Fill arc: starts at left (score 1), grows rightward (score 10) -->
-        <path id="gauge-fill" d="M 25 115 A 85 85 0 0 0 195 115"
+        <path id="gauge-fill" d="M 25 115 A 85 85 0 0 1 195 115"
               stroke="#fca311" stroke-width="14" stroke-linecap="round"
               stroke-dasharray="267.04" stroke-dashoffset="267.04"/>
         <!-- Needle: points right at 0°, rotated by JS; transform-origin set in CSS -->
