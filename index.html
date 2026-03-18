@@ -137,11 +137,16 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 #timeline-wrap { margin: 16px 0; }
 .timeline-bar-outer {
   position: relative; height: 18px; background: rgba(255,255,255,0.07);
-  border-radius: 9px; margin: 60px 0;
+  border-radius: 9px; margin: 54px 0;
 }
 .timeline-progress { position: absolute; top:0; left:0; height:100%; background: linear-gradient(90deg, rgba(0,166,255,0.3), rgba(0,255,204,0.3)); border-radius:9px; }
 .timeline-marker { position:absolute; top:50%; transform:translate(-50%,-50%); width:10px; height:22px; background:var(--blue); border-radius:2px; box-shadow:0 0 8px rgba(0,166,255,0.5); border:1px solid #fff; }
-.tl-emoji { position:absolute; font-size:1rem; transform:translateX(-50%); white-space:nowrap; text-align:center; }
+.tl-emoji {
+  position:absolute; font-size:1rem; white-space:nowrap;
+  display:flex; flex-direction:column; align-items:center;
+}
+.tl-stem { display:block; width:1px; background:rgba(255,255,255,0.2); flex-shrink:0; }
+.tl-emoji:hover .tl-stem { background:var(--blue); width:2px; }
 .tl-badge {
   position:absolute; top:-6px; right:-8px;
   background:var(--accent); color:#161821;
@@ -152,8 +157,14 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .tl-end   { right:0; top:50%; transform:translateY(-50%); }
 
 /* ── History timelines ────────────────────────────────────────────────── */
-.hist-day { margin-bottom: 36px; }
-.hist-day-label { font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+.hist-day {
+  background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06);
+  border-radius:10px; padding:8px 14px 10px; margin-bottom:10px;
+}
+.hist-day-label { font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+/* Wrapper reserves space so emoji overflow stays inside the card border */
+.hist-tl-wrap { padding-top:50px; padding-bottom:40px; }
+.hist-tl-wrap .timeline-bar-outer { margin:0; }
 
 /* ── Chat ─────────────────────────────────────────────────────────────── */
 #chat-list {
@@ -630,6 +641,38 @@ function startTimer() {
   state.timerHandle = setInterval(tick, 1000);
 }
 
+// ── Timeline shared helpers ─────────────────────────────────────────────────
+function clusterLogs(logsWithPos) {
+  const sorted = [...logsWithPos].sort((a, b) => a.pos_pct - b.pos_pct);
+  const clusters = [];
+  for (const log of sorted) {
+    if (clusters.length && Math.abs(log.pos_pct - clusters[clusters.length-1].pos) < 3.0) {
+      clusters[clusters.length-1].emojis.push(log.emoji);
+      clusters[clusters.length-1].items.push(log.item);
+    } else {
+      clusters.push({ pos: log.pos_pct, emojis: [log.emoji], items: [log.item] });
+    }
+  }
+  return clusters;
+}
+
+function buildMarkers(clusters) {
+  let markers = '';
+  clusters.forEach((c, i) => {
+    const above   = i % 2 === 0;
+    const stemH   = 14 + Math.floor(i / 2) * 14; // 14px base, +14px per extra lane
+    const left    = Math.max(0, Math.min(100, c.pos));
+    const xform   = left < 5 ? 'translateX(0)' : left > 95 ? 'translateX(-100%)' : 'translateX(-50%)';
+    const badge   = c.emojis.length > 1 ? `<span class="tl-badge">${c.emojis.length}</span>` : '';
+    const pos     = above ? 'bottom:100%' : 'top:100%';
+    const eSpan   = `<span style="position:relative;display:inline-block">${c.emojis[0]}${badge}</span>`;
+    const sSpan   = `<span class="tl-stem" style="height:${stemH}px"></span>`;
+    const inner   = above ? `${eSpan}${sSpan}` : `${sSpan}${eSpan}`;
+    markers += `<div class="tl-emoji" style="left:${left.toFixed(1)}%;${pos};transform:${xform}" title="${esc(c.items.join(', '))}">${inner}</div>`;
+  });
+  return markers;
+}
+
 // ── Timeline renderer ──────────────────────────────────────────────────────
 function renderTimeline(logs, window, dash) {
   const wrap = document.getElementById('timeline-wrap');
@@ -638,35 +681,8 @@ function renderTimeline(logs, window, dash) {
     return;
   }
 
-  // Cluster logs by position (within 3%)
-  const clusters = [];
-  const sorted = [...logs].sort((a,b) => a.pos_pct - b.pos_pct);
-  for (const log of sorted) {
-    const pos = log.pos_pct;
-    if (clusters.length && Math.abs(pos - clusters[clusters.length-1].pos) < 3.0) {
-      clusters[clusters.length-1].emojis.push(log.emoji);
-      clusters[clusters.length-1].items.push(log.item);
-    } else {
-      clusters.push({ pos, emojis: [log.emoji], items: [log.item] });
-    }
-  }
-
-  // Build lane assignments (alternate above/below)
-  let markers = '';
-  clusters.forEach((c, i) => {
-    const above = i % 2 === 0;
-    const laneOffset = 15 + Math.floor(i / 2) * 25;
-    const topStyle = above
-      ? `bottom: calc(100% + ${laneOffset}px)`
-      : `top: calc(100% + ${laneOffset}px)`;
-    const left = Math.max(0, Math.min(100, c.pos));
-    const xform = left < 5 ? 'translateX(0)' : left > 95 ? 'translateX(-100%)' : 'translateX(-50%)';
-    const badge = c.emojis.length > 1 ? `<span class="tl-badge">${c.emojis.length}</span>` : '';
-    const title = c.items.join(', ');
-    markers += `<div class="tl-emoji" style="left:${left.toFixed(1)}%;${topStyle};transform:${xform}" title="${esc(title)}">`
-             + c.emojis[0] + badge
-             + `</div>`;
-  });
+  const clusters = clusterLogs(logs);
+  const markers  = buildMarkers(clusters);
 
   // Progress marker
   let progress = '';
@@ -861,36 +877,18 @@ function renderHistoryTimelines(logHistory, schedule) {
       return { ...l, pos_pct: pos };
     });
 
-    // Cluster by position (within 3%)
-    const sorted = [...logsWithPos].sort((a, b) => a.pos_pct - b.pos_pct);
-    const clusters = [];
-    for (const log of sorted) {
-      if (clusters.length && Math.abs(log.pos_pct - clusters[clusters.length - 1].pos) < 3.0) {
-        clusters[clusters.length - 1].emojis.push(log.emoji);
-        clusters[clusters.length - 1].items.push(log.item);
-      } else {
-        clusters.push({ pos: log.pos_pct, emojis: [log.emoji], items: [log.item] });
-      }
-    }
-
-    let markers = '';
-    clusters.forEach((c, i) => {
-      const above = i % 2 === 0;
-      const laneOffset = 15 + Math.floor(i / 2) * 25;
-      const topStyle = above ? `bottom:calc(100% + ${laneOffset}px)` : `top:calc(100% + ${laneOffset}px)`;
-      const left = Math.max(0, Math.min(100, c.pos));
-      const xform = left < 5 ? 'translateX(0)' : left > 95 ? 'translateX(-100%)' : 'translateX(-50%)';
-      const badge = c.emojis.length > 1 ? `<span class="tl-badge">${c.emojis.length}</span>` : '';
-      markers += `<div class="tl-emoji" style="left:${left.toFixed(1)}%;${topStyle};transform:${xform}" title="${esc(c.items.join(', '))}">${c.emojis[0]}${badge}</div>`;
-    });
+    const clusters = clusterLogs(logsWithPos);
+    const markers  = buildMarkers(clusters);
 
     const dateLabel = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
     html += `<div class="hist-day">
       <div class="hist-day-label">${dateLabel}</div>
-      <div class="timeline-bar-outer">
-        <span class="tl-label tl-start">${sched.start}</span>
-        <span class="tl-label tl-end">${sched.end}</span>
-        ${markers}
+      <div class="hist-tl-wrap">
+        <div class="timeline-bar-outer">
+          <span class="tl-label tl-start">${sched.start}</span>
+          <span class="tl-label tl-end">${sched.end}</span>
+          ${markers}
+        </div>
       </div>
     </div>`;
   }
