@@ -207,7 +207,15 @@ def _parse_weight_date(val: str) -> Optional[str]:
     """Parse a weight log timestamp into a YYYY-MM-DD string, or None on failure."""
     from datetime import datetime as _dt
     s = str(val).strip()
-    for fmt in ("%m/%d/%Y %H:%M", "%m/%d/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+    for fmt in (
+        "%m/%d/%Y %H:%M:%S",   # Google Sheets default: 3/18/2026 14:30:00
+        "%m/%d/%Y %I:%M:%S %p",# 12-hour with AM/PM:   3/18/2026 2:30:00 PM
+        "%m/%d/%Y %H:%M",      # without seconds:      3/18/2026 14:30
+        "%m/%d/%Y",            # date only
+        "%Y-%m-%d %H:%M:%S",   # ISO with seconds
+        "%Y-%m-%dT%H:%M:%S",   # ISO with T separator
+        "%Y-%m-%d",            # ISO date only
+    ):
         try:
             return _dt.strptime(s, fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -225,22 +233,36 @@ def _read_weight_history() -> list:
             return []
         data = ws.get_all_records()
         if not data:
+            log.warning("_read_weight_history: worksheet '%s' is empty", WS_WEIGHT_LOGS)
             return []
+        log.info("_read_weight_history: %d rows, columns: %s", len(data), list(data[0].keys()))
         daily: dict = {}  # date_str -> lowest weight seen that day
+        skipped_ts, skipped_col = 0, 0
+        first_bad_ts = None
         for r in data:
             ts_val     = r.get("Timestamp") or r.get("Date") or r.get("date") or ""
             weight_val = r.get("Weight (lbs)")
             if not ts_val or not weight_val:
+                skipped_col += 1
                 continue
             try:
                 weight   = float(weight_val)
                 date_key = _parse_weight_date(ts_val)
                 if not date_key:
+                    if first_bad_ts is None:
+                        first_bad_ts = ts_val
+                    skipped_ts += 1
                     continue
                 if date_key not in daily or weight < daily[date_key]:
                     daily[date_key] = weight
             except (ValueError, TypeError):
-                pass
+                skipped_col += 1
+        if skipped_ts:
+            log.warning("_read_weight_history: %d rows skipped — timestamp unparseable (first: %r)",
+                        skipped_ts, first_bad_ts)
+        if skipped_col:
+            log.warning("_read_weight_history: %d rows skipped — missing/invalid column data", skipped_col)
+        log.info("_read_weight_history: parsed %d unique days from %d rows", len(daily), len(data))
         entries = sorted(
             [{"date": d, "weight": w} for d, w in daily.items()],
             key=lambda x: x["date"],
