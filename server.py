@@ -488,6 +488,36 @@ def build_system_prompt(
 {rows}
 """
 
+    coaching_mode = ""
+    if today_stats:
+        protein_done  = today_stats['protein'] >= goals['protein']
+        cals_near_lid = today_stats['cals'] >= int(goals['calories'] * 0.88)
+        is_evening    = now.hour >= 18
+        if protein_done and is_evening:
+            mode_text = (
+                "CLOSE-OF-DAY MODE: Protein floor is ACHIEVED and it is evening. "
+                "Shift to a warm wrap-up tone. Do NOT suggest eating more protein or additional meals. "
+                "Celebrate the day's wins with a brief, energetic close-of-day summary."
+            )
+        elif protein_done:
+            mode_text = (
+                "PROTEIN COMPLETE: The protein floor has already been hit for today. "
+                "Do NOT suggest more protein sources or pivot strategies. "
+                "Focus coaching on calorie headroom and density quality only."
+            )
+        elif cals_near_lid:
+            mode_text = (
+                "CALORIE CEILING ALERT: Calories are close to the lid. "
+                "Only suggest very high-density, low-calorie protein sources. "
+                "Do not recommend any calorie-heavy foods."
+            )
+        else:
+            mode_text = (
+                "ACTIVE LOGGING MODE: Guide toward hitting the protein floor and maintaining 10%+ density. "
+                "Encourage strategic high-density choices for upcoming meals."
+            )
+        coaching_mode = f"\n### COACHING MODE (apply this to your response tone and suggestions):\n{mode_text}\n"
+
     weekly_context = ""
     if weekly_summary:
         today_str = now.strftime("%Y-%m-%d")
@@ -505,6 +535,7 @@ def build_system_prompt(
 {custom_instructions}
 - **Negative Constraint:** NEVER call the user "Commander" or use military/warlike terminology (e.g., "Sitreps", "Tactical", "Mission").
 - **Persona Alignment:** Always respect the user's explicit requests in the chat history over the base persona directives.
+- **No Duplicate Warnings:** NEVER generate "System Notice" messages or ask the user to confirm they are logging the same item twice. Duplicate items are completely expected (e.g., two shakes in one day). Log every item the user reports immediately, without any confirmation prompts.
 
 You are the RatioTen Assistant, acting as an **Enthusiastic Nutrition & Fitness Coach**.
 You are precise, analytical, supportive, and deeply encouraging.
@@ -521,7 +552,7 @@ Core Logic:
 - Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
 
-{stats_context}
+{stats_context}{coaching_mode}
 {logs_context}
 {weekly_context}
 
@@ -539,6 +570,7 @@ Formatting Constraints (Mobile Optimized):
 - NEVER include Date or Date-Range columns in visible output.
 - When logging food, display ONLY ONE table with the items, but you MUST also include conversational banter.
   1. Current Day's Items: (Item Name, Cals, Protein, Density)
+- **Source of Truth for Item Table:** The "TODAY'S EXPLICIT FOOD LOGS" section above is the authoritative record of everything logged today (pulled directly from the database). When showing the running item table, always include ALL items from that injected list PLUS any new item(s) from the current message. NEVER reconstruct the item list from conversation history alone.
 
 Daily Targets & Banter (REQUIRED):
 - Goal: <= {goals['calories']} Calories, >= {goals['protein']}g Protein, Density Target: >= 10.0%.
