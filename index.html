@@ -192,8 +192,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
 /* ── Analyze view ─────────────────────────────────────────────────────── */
 .gauge-wrap { margin:4px 0 12px; }
-#gauge-fill   { transition: stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1), stroke 0.3s ease; }
-#gauge-needle { transform-origin: 110px 115px; transition: transform 0.9s cubic-bezier(0.4,0,0.2,1); }
+#gauge-fill { transition: stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1); }
+#gauge-glow { transition: stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1), opacity 0.9s ease; }
 .driver-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px; }
 .driver-card { background:var(--card2); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
 .driver-label { font-size:0.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
@@ -332,31 +332,40 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   <!-- ANALYZE VIEW -->
   <div id="view-analyze" class="view">
     <div class="gauge-wrap">
-      <!-- cx=110 cy=115 r=85  |  circumference=267.04  |  CW (sweep=1) = arcs through top -->
-      <!-- Zone boundaries: score4→angle120°→(67.5,41.4)  score7→angle60°→(152.5,41.4) -->
+      <!-- cx=110 cy=115 r=85  |  circumference=267.04  |  CW (sweep=1) = arch through top -->
       <svg id="gauge-svg" viewBox="0 0 220 130" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <!-- Dim zone backgrounds (sweep=1 = CW = arch through top) -->
-        <path d="M 25 115 A 85 85 0 0 1 67.5 41.4"   stroke="rgba(220,53,69,0.22)"  stroke-width="14" stroke-linecap="butt"/>
-        <path d="M 67.5 41.4 A 85 85 0 0 1 152.5 41.4" stroke="rgba(252,163,17,0.22)" stroke-width="14" stroke-linecap="butt"/>
-        <path d="M 152.5 41.4 A 85 85 0 0 1 195 115" stroke="rgba(0,201,122,0.22)"  stroke-width="14" stroke-linecap="butt"/>
-        <!-- Zone divider ticks (radial lines across the track) -->
-        <line x1="71" y1="47.5" x2="64" y2="35.3" stroke="rgba(14,17,23,0.85)" stroke-width="2.5"/>
-        <line x1="149" y1="47.5" x2="156" y2="35.3" stroke="rgba(14,17,23,0.85)" stroke-width="2.5"/>
-        <!-- Fill arc: starts at left (score 1), grows rightward (score 10) -->
+        <defs>
+          <!-- Dark navy → electric blue, left to right across the arc span -->
+          <linearGradient id="arc-grad" x1="25" y1="115" x2="195" y2="115" gradientUnits="userSpaceOnUse">
+            <stop offset="0%"   stop-color="#001833"/>
+            <stop offset="100%" stop-color="#00A6FF"/>
+          </linearGradient>
+          <!-- Glow blur filter -->
+          <filter id="arc-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="text-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <!-- Background track -->
+        <path d="M 25 115 A 85 85 0 0 1 195 115"
+              stroke="rgba(0,166,255,0.07)" stroke-width="14" stroke-linecap="round"/>
+        <!-- Glow layer (wider blurred duplicate, opacity driven by JS) -->
+        <path id="gauge-glow" d="M 25 115 A 85 85 0 0 1 195 115"
+              stroke="#00A6FF" stroke-width="22" stroke-linecap="round"
+              stroke-dasharray="267.04" stroke-dashoffset="267.04"
+              filter="url(#arc-glow)" opacity="0"/>
+        <!-- Fill arc with dark→electric blue gradient -->
         <path id="gauge-fill" d="M 25 115 A 85 85 0 0 1 195 115"
-              stroke="#fca311" stroke-width="14" stroke-linecap="round"
+              stroke="url(#arc-grad)" stroke-width="14" stroke-linecap="round"
               stroke-dasharray="267.04" stroke-dashoffset="267.04"/>
-        <!-- Needle: points right at 0°, rotated by JS; transform-origin set in CSS -->
-        <line id="gauge-needle" x1="110" y1="115" x2="186" y2="115"
-              stroke="rgba(255,255,255,0.92)" stroke-width="2.5" stroke-linecap="round"
-              style="transform:rotate(-180deg)"/>
-        <!-- Pivot -->
-        <circle cx="110" cy="115" r="5.5" fill="#fff"/>
-        <circle cx="110" cy="115" r="2.5" fill="var(--bg)"/>
         <!-- Score value -->
         <text id="gauge-score-text" x="110" y="86" text-anchor="middle"
               font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
-              font-size="30" font-weight="800" fill="#fca311">—</text>
+              font-size="30" font-weight="800" fill="rgba(0,166,255,0.35)">—</text>
         <!-- Sub-label -->
         <text x="110" y="100" text-anchor="middle"
               font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
@@ -804,22 +813,23 @@ async function loadAnalyze() {
 
 function renderEffectiveness(eff) {
   const fillEl    = document.getElementById('gauge-fill');
-  const needleEl  = document.getElementById('gauge-needle');
+  const glowEl    = document.getElementById('gauge-glow');
   const scoreText = document.getElementById('gauge-score-text');
   const grid      = document.getElementById('driver-grid');
   const tip       = document.getElementById('coach-tip');
   const C         = Math.PI * 85; // semicircle circumference ≈ 267.04
 
-  function setGauge(fraction, color) {
-    fillEl.style.stroke = color;
+  function setGauge(fraction) {
     fillEl.style.strokeDashoffset = C * (1 - fraction);
-    needleEl.style.transform = `rotate(${-(fraction * 180)}deg)`;
+    glowEl.style.strokeDashoffset = C * (1 - fraction);
+    glowEl.style.opacity = fraction < 0.01 ? 0 : 0.18 + fraction * 0.52;
   }
 
   if (eff.error || !eff.score) {
-    setGauge(0, 'var(--muted)');
+    setGauge(0);
     scoreText.textContent = '—';
-    scoreText.setAttribute('fill', 'var(--muted)');
+    scoreText.setAttribute('fill', 'rgba(0,166,255,0.35)');
+    scoreText.removeAttribute('filter');
     grid.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);font-size:0.85rem">${esc(eff.error || 'Not enough data yet (need 7+ days).')}</div>`;
     tip.style.display = 'none';
     return;
@@ -827,10 +837,10 @@ function renderEffectiveness(eff) {
 
   const score    = parseFloat(eff.score);
   const fraction = Math.max(0, Math.min(1, (score - 1) / 9));
-  const color    = score >= 8 ? '#00c97a' : score >= 5 ? '#fca311' : '#dc3545';
-  setGauge(fraction, color);
+  setGauge(fraction);
   scoreText.textContent = score.toFixed(1);
-  scoreText.setAttribute('fill', color);
+  scoreText.setAttribute('fill', '#00A6FF');
+  scoreText.setAttribute('filter', 'url(#text-glow)');
 
   const d = eff.drivers || {};
   const adRate = d.total_days > 0 ? Math.round((d.adherent_days / d.total_days) * 100) : 0;
