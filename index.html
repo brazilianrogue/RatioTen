@@ -889,7 +889,7 @@ function switchView(name) {
   } else {
     bar.classList.remove('visible');
   }
-  syncContentBottom();
+  document.getElementById('content').classList.toggle('no-bar', name !== 'log');
   if (name === 'analyze') loadAnalyze();
   if (name === 'plan' && !state.planLoaded) loadPlan();
 }
@@ -1196,21 +1196,6 @@ function appendBubble(role, text, streaming = false) {
 function scrollChat() {
   const list = document.getElementById('chat-list');
   list.scrollTop = list.scrollHeight;
-}
-
-// Measure the actual rendered bar height and pin #content bottom to it.
-// Avoids relying on env() evaluating identically in both the bar height
-// and the content bottom calc — which can race on iOS PWA initial layout.
-function syncContentBottom() {
-  const bar  = document.getElementById('input-bar');
-  const cont = document.getElementById('content');
-  if (bar.classList.contains('visible')) {
-    cont.style.bottom = bar.getBoundingClientRect().height + 'px';
-    cont.classList.remove('no-bar');
-  } else {
-    cont.style.removeProperty('bottom');   // fall back to CSS (.no-bar)
-    cont.classList.add('no-bar');
-  }
 }
 
 // ── Chat submit ────────────────────────────────────────────────────────────
@@ -1881,14 +1866,6 @@ function showMsg(id, msg, color) {
 (async function init() {
   // Show input bar for log view
   document.getElementById('input-bar').classList.add('visible');
-  // Sync content bottom after bar renders, and whenever the bar's size changes.
-  // ResizeObserver catches env(safe-area-inset-bottom) settling after the initial
-  // iOS PWA layout pass — rAF fires too early, before the safe area is computed,
-  // so the bar measures at 64px then grows to ~98px when env() resolves to 34px.
-  const barEl = document.getElementById('input-bar');
-  new ResizeObserver(syncContentBottom).observe(barEl);
-  requestAnimationFrame(syncContentBottom);
-  window.addEventListener('resize', syncContentBottom);
   // Load dashboard data
   await Promise.all([loadDashboard(), loadChatHistory()]);
   // Refresh dashboard every 30s
