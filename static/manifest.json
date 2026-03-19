@@ -1,0 +1,25 @@
+{
+  "name": "RatioTen",
+  "short_name": "RatioTen",
+  "description": "Precision nutrition tracking",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/",
+  "scope": "/",
+  "background_color": "#0e1117",
+  "theme_color": "#fca311",
+  "icons": [
+    {
+      "src": "/static/favicon.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
