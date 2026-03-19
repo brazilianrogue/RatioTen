@@ -1881,7 +1881,12 @@ function showMsg(id, msg, color) {
 (async function init() {
   // Show input bar for log view
   document.getElementById('input-bar').classList.add('visible');
-  // Sync content bottom after bar renders, and on every resize/orientation change
+  // Sync content bottom after bar renders, and whenever the bar's size changes.
+  // ResizeObserver catches env(safe-area-inset-bottom) settling after the initial
+  // iOS PWA layout pass — rAF fires too early, before the safe area is computed,
+  // so the bar measures at 64px then grows to ~98px when env() resolves to 34px.
+  const barEl = document.getElementById('input-bar');
+  new ResizeObserver(syncContentBottom).observe(barEl);
   requestAnimationFrame(syncContentBottom);
   window.addEventListener('resize', syncContentBottom);
   // Load dashboard data
