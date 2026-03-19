@@ -1155,12 +1155,13 @@ async function loadChatHistory() {
       return;
     }
     empty.style.display = 'none';
-    msgs.forEach(msg => appendBubble(msg.role, msg.content.join('\n')));
-    scrollChat();
+    msgs.forEach(msg => appendBubble(msg.role, msg.content.join('\n'), false, false));
+    // Scroll only the inner list — leave #content at top so dashboard is visible on load
+    document.getElementById('chat-list').scrollTop = document.getElementById('chat-list').scrollHeight;
   } catch(e) {}
 }
 
-function appendBubble(role, text, streaming = false) {
+function appendBubble(role, text, streaming = false, scroll = true) {
   const list  = document.getElementById('chat-list');
   const empty = document.getElementById('chat-empty');
   empty.style.display = 'none';
@@ -1171,7 +1172,7 @@ function appendBubble(role, text, streaming = false) {
   bub.innerHTML = streaming ? '…' : mdToHtml(text);
   row.appendChild(bub);
   list.appendChild(row);
-  scrollChat();
+  if (scroll) scrollChat();
   return bub;
 }
 
