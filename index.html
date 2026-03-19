@@ -1848,7 +1848,7 @@ function showMsg(id, msg, color) {
 
 // ── Debug Overlay (?debug=1) ────────────────────────────────────────────────
 (function initDebugOverlay() {
-  if (!new URLSearchParams(location.search).has('debug')) return;
+  // Temporarily always-on for PWA debugging — revert to URL param check after diagnosis
 
   // Measure elements with env() heights we can't read directly from getComputedStyle
   function measureEnv(prop) {
