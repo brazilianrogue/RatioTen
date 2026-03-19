@@ -33,7 +33,7 @@
   --radius:  12px;
   --font:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
 
 /* ── Fixed nav ────────────────────────────────────────────────────────── */
 #nav {
@@ -68,25 +68,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 
 /* ── Scrollable main ──────────────────────────────────────────────────── */
 #content {
-  position: fixed;
-  top:    calc(var(--nav-h) + env(safe-area-inset-top, 0px));
-  bottom: calc(var(--bar-h) + env(safe-area-inset-bottom, 0px));
-  left: 0; right: 0;
+  height: 100dvh;
+  padding-top:    calc(var(--nav-h) + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(var(--bar-h) + env(safe-area-inset-bottom, 0px) + 8px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
-}
-/* Stats/Plan: no input bar, content fills to safe-area bottom */
-#content.no-bar {
-  bottom: env(safe-area-inset-bottom, 0px);
-}
-/* Fill the safe-area gap below the input bar with the page background */
-body::after {
-  content: '';
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 99;
-  height: env(safe-area-inset-bottom, 0px);
-  background: var(--bg);
-  pointer-events: none;
 }
 .view { display: none; padding: 12px 14px; }
 .view.active { display: block; }
@@ -100,11 +86,7 @@ body::after {
   border-top: 1px solid var(--border);
   display: none; /* shown only in Log view */
 }
-#input-bar.visible {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px;
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 10px);
-}
+#input-bar.visible { display: flex; align-items: center; padding: 6px 10px; gap: 8px; }
 #meal-input {
   flex: 1; height: 46px; background: var(--card); border: 1px solid rgba(255,255,255,0.1);
   border-radius: 24px; color: #fff; padding: 0 18px; font-size: 1rem; outline: none;
@@ -889,7 +871,6 @@ function switchView(name) {
   } else {
     bar.classList.remove('visible');
   }
-  document.getElementById('content').classList.toggle('no-bar', name !== 'log');
   if (name === 'analyze') loadAnalyze();
   if (name === 'plan' && !state.planLoaded) loadPlan();
 }
