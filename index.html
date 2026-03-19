@@ -1845,6 +1845,191 @@ function showMsg(id, msg, color) {
   setTimeout(() => { el.textContent = ''; }, 3000);
 }
 
+// ── Debug Overlay (?debug=1) ────────────────────────────────────────────────
+(function initDebugOverlay() {
+  if (!new URLSearchParams(location.search).has('debug')) return;
+
+  // Measure elements with env() heights we can't read directly from getComputedStyle
+  function measureEnv(prop) {
+    const el = document.createElement('div');
+    el.style.cssText = `position:fixed;top:0;left:0;width:0;height:env(${prop},0px);overflow:hidden;pointer-events:none;visibility:hidden;z-index:-1`;
+    document.body.appendChild(el);
+    const h = el.offsetHeight;
+    document.body.removeChild(el);
+    return h;
+  }
+
+  function measureVhUnit(expr) {
+    const el = document.createElement('div');
+    el.style.cssText = `position:fixed;top:0;left:0;width:0;height:${expr};overflow:hidden;pointer-events:none;visibility:hidden;z-index:-1`;
+    document.body.appendChild(el);
+    const h = el.offsetHeight;
+    document.body.removeChild(el);
+    return h;
+  }
+
+  function pxColor(val, expected, tol) {
+    if (expected === undefined) return '#fff';
+    return Math.abs(val - expected) <= tol ? '#4f4' : '#f84';
+  }
+
+  function row(label, value, color) {
+    color = color || '#fff';
+    return `<tr><td style="color:#888;padding-right:8px;white-space:nowrap">${label}</td><td style="color:${color};font-weight:600;text-align:right">${value}</td></tr>`;
+  }
+
+  function section(title) {
+    return `<tr><td colspan="2" style="color:#fca311;padding-top:6px;padding-bottom:1px;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.05em">${title}</td></tr>`;
+  }
+
+  // Build pill toggle button
+  const pill = document.createElement('button');
+  pill.textContent = 'DBG';
+  pill.style.cssText = 'position:fixed;top:50%;right:0;z-index:10000;background:#fca311;color:#000;font-weight:900;font-size:10px;padding:4px 6px;border:none;border-radius:4px 0 0 4px;cursor:pointer;transform:translateY(-50%);font-family:monospace';
+  document.body.appendChild(pill);
+
+  // Build panel
+  const panel = document.createElement('div');
+  panel.style.cssText = 'position:fixed;top:0;right:0;z-index:9999;background:rgba(0,0,0,0.88);color:#fff;font-size:11px;font-family:monospace;padding:8px;width:220px;max-height:100vh;overflow-y:auto;display:none;box-shadow:-2px 0 12px rgba(0,0,0,0.6)';
+  document.body.appendChild(panel);
+
+  let expanded = false;
+  pill.addEventListener('click', () => {
+    expanded = !expanded;
+    panel.style.display = expanded ? 'block' : 'none';
+    pill.style.right = expanded ? '220px' : '0';
+  });
+
+  function refresh() {
+    if (!expanded) return;
+
+    const vv = window.visualViewport;
+    const content = document.getElementById('content');
+    const nav = document.getElementById('nav');
+    const bar = document.getElementById('input-bar');
+    const chatList = document.getElementById('chat-list');
+    const contentCS = getComputedStyle(content);
+    const barRect = bar.getBoundingClientRect();
+    const navRect = nav.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+
+    const safeTop    = measureEnv('safe-area-inset-top');
+    const safeBottom = measureEnv('safe-area-inset-bottom');
+    const safeLeft   = measureEnv('safe-area-inset-left');
+    const safeRight  = measureEnv('safe-area-inset-right');
+
+    const vh100   = measureVhUnit('100vh');
+    const dvh100  = measureVhUnit('100dvh');
+    const svh100  = measureVhUnit('100svh');
+    const lvh100  = measureVhUnit('100lvh');
+
+    const standalone = !!window.navigator.standalone;
+    const displayStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    const displayBrowser    = window.matchMedia('(display-mode: browser)').matches;
+
+    const navH  = getComputedStyle(document.documentElement).getPropertyValue('--nav-h').trim();
+    const barH  = getComputedStyle(document.documentElement).getPropertyValue('--bar-h').trim();
+
+    const meta = document.querySelector('meta[name=viewport]');
+    const vpFitCover = meta ? meta.content.includes('viewport-fit=cover') : false;
+
+    const ua = navigator.userAgent;
+    const iOSMatch = ua.match(/OS (\d+)_(\d+)/);
+    const iOSVer = iOSMatch ? `iOS ${iOSMatch[1]}.${iOSMatch[2]}` : 'non-iOS';
+
+    // Expected: bar bottom should == window.innerHeight (covers to screen bottom)
+    const barBottomOk = Math.abs(barRect.bottom - window.innerHeight) <= 2;
+    // Expected: content bottom should == bar top (no gap, no overlap)
+    const contentBarGap = barRect.top - contentRect.bottom;
+
+    const rows = [
+      section('Device'),
+      row('UA', iOSVer),
+      row('standalone (nav)', standalone ? 'YES ✓' : 'NO', standalone ? '#4f4' : '#f84'),
+      row('display-mode', displayStandalone ? 'standalone' : (displayBrowser ? 'browser' : 'other')),
+      row('viewport-fit=cover', vpFitCover ? 'YES ✓' : 'MISSING ✗', vpFitCover ? '#4f4' : '#f44'),
+      row('devicePixelRatio', window.devicePixelRatio),
+
+      section('Window / Viewport'),
+      row('window.innerW×H', `${window.innerWidth}×${window.innerHeight}`),
+      row('screen.W×H', `${screen.width}×${screen.height}`),
+      row('docEl.clientH', document.documentElement.clientHeight),
+      row('vv.width×height', vv ? `${Math.round(vv.width)}×${Math.round(vv.height)}` : 'n/a'),
+      row('vv.offsetTop', vv ? Math.round(vv.offsetTop) : 'n/a'),
+      row('vv.scale', vv ? vv.scale.toFixed(3) : 'n/a'),
+
+      section('vh Units (px)'),
+      row('100vh',  vh100,  pxColor(vh100,  window.innerHeight, 2)),
+      row('100dvh', dvh100, pxColor(dvh100, window.innerHeight, 2)),
+      row('100svh', svh100),
+      row('100lvh', lvh100),
+
+      section('Safe Area Insets'),
+      row('inset-top',    safeTop    + 'px', safeTop    > 0 ? '#4f4' : '#f84'),
+      row('inset-bottom', safeBottom + 'px', safeBottom > 0 ? '#4f4' : '#f84'),
+      row('inset-left',   safeLeft   + 'px'),
+      row('inset-right',  safeRight  + 'px'),
+
+      section('CSS Variables'),
+      row('--nav-h', navH),
+      row('--bar-h', barH),
+
+      section('Nav #nav'),
+      row('top', navRect.top.toFixed(1) + 'px'),
+      row('height', navRect.height.toFixed(1) + 'px'),
+      row('bottom', navRect.bottom.toFixed(1) + 'px'),
+
+      section('#content'),
+      row('position', contentCS.position),
+      row('top', contentRect.top.toFixed(1) + 'px'),
+      row('bottom', contentRect.bottom.toFixed(1) + 'px', pxColor(contentRect.bottom, window.innerHeight, 2)),
+      row('height', contentRect.height.toFixed(1) + 'px'),
+      row('paddingTop', contentCS.paddingTop),
+      row('paddingBottom', contentCS.paddingBottom),
+      row('scrollTop', content.scrollTop.toFixed(1) + 'px'),
+      row('scrollHeight', content.scrollHeight + 'px'),
+      row('overflow', contentCS.overflowY),
+
+      section('#input-bar'),
+      row('visible', bar.classList.contains('visible') ? 'YES' : 'NO'),
+      row('top', barRect.top.toFixed(1) + 'px'),
+      row('height', barRect.height.toFixed(1) + 'px'),
+      row('bottom', barRect.bottom.toFixed(1) + 'px', barBottomOk ? '#4f4' : '#f44'),
+
+      section('Gap Analysis'),
+      row('layout mode', contentCS.position === 'fixed' ? 'fixed' : 'dvh+pad'),
+      row('content.bottom', contentRect.bottom.toFixed(1) + 'px'),
+      row('bar.top', barRect.top.toFixed(1) + 'px'),
+      // With position:fixed layout, gap should be ~0. With dvh+padding layout,
+      // bar floats over content so negative overlap is expected — check padding instead.
+      contentCS.position === 'fixed'
+        ? row('gap (bar↔content)', contentBarGap.toFixed(1) + 'px', Math.abs(contentBarGap) <= 4 ? '#4f4' : '#f44')
+        : row('padBottom vs bar.h', `${parseFloat(contentCS.paddingBottom).toFixed(0)} vs ${barRect.height.toFixed(0)}`,
+            parseFloat(contentCS.paddingBottom) >= barRect.height - 2 ? '#4f4' : '#f44'),
+      row('gap below bar', (window.innerHeight - barRect.bottom).toFixed(1) + 'px',
+          Math.abs(window.innerHeight - barRect.bottom) <= 2 ? '#4f4' : '#f44'),
+      row('safeBottom accounted',
+          safeBottom === 0 ? 'env=0 — OK in browser' :
+          (barRect.height >= 64 + safeBottom - 2 ? 'YES ✓' : 'NO ✗ bar too short'),
+          safeBottom === 0 ? '#888' : (barRect.height >= 64 + safeBottom - 2 ? '#4f4' : '#f44')),
+
+      section('#chat-list'),
+      row('scrollTop', chatList ? chatList.scrollTop.toFixed(1) + 'px' : 'n/a'),
+      row('scrollH', chatList ? chatList.scrollHeight + 'px' : 'n/a'),
+      row('clientH', chatList ? chatList.clientHeight + 'px' : 'n/a'),
+      row('atBottom', chatList ? (chatList.scrollTop >= chatList.scrollHeight - chatList.clientHeight - 4 ? 'YES ✓' : 'NO') : 'n/a'),
+    ];
+
+    panel.innerHTML = `<div style="color:#fca311;font-weight:900;margin-bottom:4px">▣ RatioTen Debug</div><table style="border-collapse:collapse;width:100%">${rows.join('')}</table><div style="color:#555;margin-top:6px;font-size:9px">${new Date().toLocaleTimeString()}</div>`;
+  }
+
+  setInterval(refresh, 500);
+  // Also refresh on scroll/resize
+  window.addEventListener('scroll', refresh, true);
+  window.addEventListener('resize', refresh);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', refresh);
+})();
+
 // ── Init ───────────────────────────────────────────────────────────────────
 (async function init() {
   // Show input bar for log view
