@@ -1196,6 +1196,8 @@ function appendBubble(role, text, streaming = false) {
 function scrollChat() {
   const list = document.getElementById('chat-list');
   list.scrollTop = list.scrollHeight;
+  const content = document.getElementById('content');
+  content.scrollTop = content.scrollHeight;
 }
 
 // ── Chat submit ────────────────────────────────────────────────────────────
