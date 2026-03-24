@@ -142,11 +142,14 @@ def calculate_plan_effectiveness(
             for i in range(SCORE_WINDOW_DAYS):
                 eval_date = calc_date - timedelta(days=i)
                 if eval_date not in daily_data:
+                    day_name = eval_date.strftime("%A")
+                    sched = fasting_schedule.get(day_name, {"start": None, "end": None})
+                    is_fasting_day = not (sched["start"] and sched["end"])
                     daily_data[eval_date] = {
                         "cals": 0.0,
                         "prot": 0.0,
                         "logs": [],
-                        "is_missing": True,
+                        "is_missing": not is_fasting_day,
                     }
 
             total_days_eval = SCORE_WINDOW_DAYS
