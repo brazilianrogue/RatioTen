@@ -15,16 +15,17 @@ RatioTen is a personal nutrition/fitness tracking PWA. It uses Google Sheets as 
 ## Deployment Workflow
 Render watches the `main` branch and auto-deploys on every push.
 
-**`gh` CLI is not installed.** To deploy:
-1. Commit and push the feature branch
-2. Open the PR via the GitHub URL printed by `git push` (e.g. `https://github.com/brazilianrogue/RatioTen/pull/new/<branch>`)
-3. Set base to `main` and merge — Render picks it up automatically
+**`gh` CLI is not installed.** Do not create PRs — merge directly into `main` via git.
 
 When the user says "commit and deploy", the workflow is:
-1. `git add <files>`
-2. `git commit`
-3. `git push origin <branch>`
-4. Provide the GitHub PR URL for the user to open and merge
+1. `git add <files>` and `git commit` on the worktree/feature branch
+2. From the main repo (`C:\Users\Brazi\VibesForClaude\RatioTen`), run:
+   ```
+   git fetch origin <branch>
+   git merge origin/<branch> --no-edit
+   git push origin main
+   ```
+3. Render auto-deploys from the push — no PR or manual merge needed.
 
 ## Repository
 - **Remote:** https://github.com/brazilianrogue/RatioTen
