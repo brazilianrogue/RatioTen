@@ -222,6 +222,22 @@ html, body { min-height: 100vh; overflow: hidden; background: var(--bg); color: 
 .s-moderate { background:rgba(252,163,17,0.15); color:var(--accent); }
 .s-poor     { background:rgba(220,53,69,0.15);  color:var(--red); }
 .tip-box { background:rgba(0,166,255,0.07); border:1px solid rgba(0,166,255,0.2); border-radius:var(--radius); padding:10px 14px; margin-bottom:16px; font-size:0.85rem; color:#b0c8e0; }
+/* Driver info bottom sheet */
+#driver-sheet-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1100; opacity:0; pointer-events:none; transition:opacity 0.22s ease; }
+#driver-sheet-backdrop.open { opacity:1; pointer-events:auto; }
+#driver-sheet { position:fixed; left:0; right:0; bottom:0; z-index:1101; background:var(--card2); border-top:1px solid var(--border); border-radius:18px 18px 0 0; padding:0 20px 40px; transform:translateY(100%); transition:transform 0.28s cubic-bezier(0.32,0.72,0,1); max-height:75vh; overflow-y:auto; }
+#driver-sheet.open { transform:translateY(0); }
+.driver-sheet-handle { width:36px; height:4px; background:rgba(255,255,255,0.18); border-radius:2px; margin:12px auto 20px; }
+.driver-sheet-title { font-size:1rem; font-weight:700; margin-bottom:10px; }
+.driver-sheet-desc { font-size:0.85rem; color:var(--muted); margin-bottom:16px; line-height:1.5; }
+.driver-sheet-thresholds { display:flex; flex-direction:column; gap:7px; }
+.driver-sheet-threshold { display:flex; align-items:center; gap:10px; font-size:0.82rem; }
+.driver-sheet-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.driver-sheet-dot.s-optimal  { background:var(--green); }
+.driver-sheet-dot.s-moderate { background:var(--accent); }
+.driver-sheet-dot.s-poor     { background:var(--red); }
+.driver-card { cursor:pointer; }
+.driver-card:active { opacity:0.75; }
 .eff-calc-link { display:block; width:fit-content; margin:-4px auto 8px; background:none; border:none; color:rgba(0,166,255,0.5); font-size:0.76rem; cursor:pointer; text-decoration:underline; font-family:var(--font); }
 .eff-calc-link:hover { color:rgba(0,166,255,0.85); }
 /* Effectiveness modal */
@@ -1421,7 +1437,7 @@ function renderEffectiveness(eff) {
   ];
 
   grid.innerHTML = drivers.map(dr => `
-    <div class="driver-card" title="${dr.tip.replace(/"/g,'&quot;')}">
+    <div class="driver-card" title="${dr.tip.replace(/"/g,'&quot;')}" onclick="openDriverSheet(${JSON.stringify(dr.label)},${JSON.stringify(dr.tip)})">
       <div class="driver-label">${dr.label}</div>
       <div class="driver-value">${dr.value}</div>
       <span class="driver-status ${dr.cls}">${dr.label_s}</span>
@@ -1437,6 +1453,37 @@ function renderEffectiveness(eff) {
 
 function openEffModal()  { document.getElementById('eff-modal').style.display = 'block'; document.body.style.overflow = 'hidden'; }
 function closeEffModal() { document.getElementById('eff-modal').style.display = 'none';  document.body.style.overflow = ''; }
+
+// Score driver bottom sheet
+const _driverDotCls = ['s-optimal','s-moderate','s-poor'];
+function openDriverSheet(label, tip) {
+  // Parse tip: first line is description, remaining lines are status rows (skip "Statuses:" header)
+  const lines = tip.split('\n');
+  const desc = lines[0] || '';
+  const thresholdLines = lines.slice(1).filter(l => l.startsWith('•'));
+
+  document.getElementById('driver-sheet-title').textContent = label;
+  document.getElementById('driver-sheet-desc').textContent  = desc;
+
+  // Render thresholds with colour-coded dots (optimal→moderate→poor order)
+  const thresholdsEl = document.getElementById('driver-sheet-thresholds');
+  thresholdsEl.innerHTML = thresholdLines.map((l, i) => {
+    const cls = _driverDotCls[i] || '';
+    return `<div class="driver-sheet-threshold">
+      <span class="driver-sheet-dot ${cls}"></span>
+      <span>${l.replace(/^•\s*/, '')}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('driver-sheet-backdrop').classList.add('open');
+  document.getElementById('driver-sheet').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeDriverSheet() {
+  document.getElementById('driver-sheet-backdrop').classList.remove('open');
+  document.getElementById('driver-sheet').classList.remove('open');
+  document.body.style.overflow = '';
+}
 
 function coachTip(d) {
   const logPct = d.logging_pct || 0;
@@ -2046,5 +2093,13 @@ function showMsg(id, msg, color) {
   setInterval(loadDashboard, 30000);
 })();
 </script>
+<!-- Driver info bottom sheet -->
+<div id="driver-sheet-backdrop" onclick="closeDriverSheet()"></div>
+<div id="driver-sheet" role="dialog" aria-modal="true">
+  <div class="driver-sheet-handle"></div>
+  <div class="driver-sheet-title" id="driver-sheet-title"></div>
+  <div class="driver-sheet-desc"  id="driver-sheet-desc"></div>
+  <div class="driver-sheet-thresholds" id="driver-sheet-thresholds"></div>
+</div>
 </body>
 </html>
