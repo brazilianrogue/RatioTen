@@ -769,6 +769,10 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       <summary>Advanced</summary>
       <div style="padding-top:8px">
         <div class="adv-row">
+          <span class="lbl">Build</span>
+          <span class="lbl" id="build-number" style="font-family:monospace;color:var(--muted)">—</span>
+        </div>
+        <div class="adv-row">
           <span class="lbl">Clear Chat History</span>
           <button class="adv-btn danger" onclick="clearChat()">Clear</button>
         </div>
@@ -2091,6 +2095,11 @@ function showMsg(id, msg, color) {
   await Promise.all([loadDashboard(), loadChatHistory()]);
   // Refresh dashboard every 30s
   setInterval(loadDashboard, 30000);
+  // Build number
+  fetch('/api/version').then(r=>r.json()).then(v=>{
+    const el = document.getElementById('build-number');
+    if (el) el.textContent = v.commit;
+  }).catch(()=>{});
 })();
 </script>
 <!-- Driver info bottom sheet -->

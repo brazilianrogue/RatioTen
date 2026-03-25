@@ -738,6 +738,13 @@ async def index():
     return FileResponse("index.html", headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/api/version")
+async def version():
+    commit = os.environ.get("RENDER_GIT_COMMIT", "")
+    short  = commit[:7] if commit else "local"
+    return {"commit": short}
+
+
 @app.get("/api/dashboard")
 async def dashboard():
     schedule       = _cached("schedule",       600,  _read_fasting_schedule)
