@@ -735,7 +735,7 @@ def _parse_meal_log(raw: str):
 
 @app.get("/")
 async def index():
-    return FileResponse("index.html")
+    return FileResponse("index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/dashboard")
