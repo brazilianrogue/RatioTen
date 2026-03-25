@@ -13,9 +13,9 @@ EASTERN = ZoneInfo("America/New_York")
 # ---------------------------------------------------------------------------
 # AI Models
 # ---------------------------------------------------------------------------
-PRIMARY_MODEL = "gemini-3-pro-preview"
-SECONDARY_MODEL = "gemini-2.5-flash"
-STABLE_MODEL = "gemini-2.0-flash"
+PRIMARY_MODEL   = "gemini-3-flash-preview"  # Best available: frontier intelligence, fast, great banter
+SECONDARY_MODEL = "gemini-2.5-flash"         # Stable proven fallback, 1K RPM paid tier
+STABLE_MODEL    = "gemini-2.5-flash-lite"    # Ultra-cheap last resort ($0.10/$0.40 per 1M tokens)
 
 # ---------------------------------------------------------------------------
 # Scoring: Weight Shift Component (0–5 pts)
