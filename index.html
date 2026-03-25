@@ -1440,8 +1440,10 @@ function renderEffectiveness(eff) {
     { label: 'Log Consistency',  value: logRate != null ? `${logRate}%` : '—', ...(logRate != null ? logStatus(logRate) : { label_s: 'No Data', cls: '' }), tip: tipLogging },
   ];
 
-  grid.innerHTML = drivers.map(dr => `
-    <div class="driver-card" title="${dr.tip.replace(/"/g,'&quot;')}" onclick="openDriverSheet(${JSON.stringify(dr.label)},${JSON.stringify(dr.tip)})">
+  // Store driver data for bottom sheet lookup (avoids quote-escaping issues in onclick attrs)
+  window._drivers = drivers;
+  grid.innerHTML = drivers.map((dr, i) => `
+    <div class="driver-card" onclick="openDriverSheet(${i})">
       <div class="driver-label">${dr.label}</div>
       <div class="driver-value">${dr.value}</div>
       <span class="driver-status ${dr.cls}">${dr.label_s}</span>
@@ -1460,7 +1462,10 @@ function closeEffModal() { document.getElementById('eff-modal').style.display = 
 
 // Score driver bottom sheet
 const _driverDotCls = ['s-optimal','s-moderate','s-poor'];
-function openDriverSheet(label, tip) {
+function openDriverSheet(idx) {
+  const dr = (window._drivers || [])[idx];
+  if (!dr) return;
+  const { label, tip } = dr;
   // Parse tip: first line is description, remaining lines are status rows (skip "Statuses:" header)
   const lines = tip.split('\n');
   const desc = lines[0] || '';
