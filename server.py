@@ -517,6 +517,22 @@ def get_fasting_status(schedule: dict) -> tuple[str, Optional[float]]:
 # System prompt builder  (ported from app.py)
 # ---------------------------------------------------------------------------
 
+_CLOSING_PHRASES = (
+    "ending the day",
+    "ending my day",
+    "kitchen closed",
+    "all done logging",
+    "done logging",
+    "last log",
+    "last meal",
+    "last item",
+    "that's it for today",
+    "thats it for today",
+    "wrapping up",
+    "closing out",
+    "closing the day",
+)
+
 def build_system_prompt(
     schedule: dict,
     goals: dict,
@@ -524,6 +540,7 @@ def build_system_prompt(
     today_stats: Optional[dict] = None,
     today_logs: Optional[list] = None,
     weekly_summary: Optional[list] = None,
+    user_message: str = "",
 ) -> str:
     now = datetime.now(EASTERN)
     formatted_schedule = "\n".join([
@@ -592,11 +609,13 @@ def build_system_prompt(
             )
         coaching_mode = f"\n### COACHING MODE (apply this to your response tone and suggestions):\n{mode_text}\n"
 
-    # Only inject the trend table at close-of-day — mid-day logs never need it.
+    # Trigger close-of-day mode when the user signals they're done eating,
+    # regardless of clock time — "ending the day with..." is a stronger signal than 6 PM.
+    msg_lower = user_message.lower()
+    user_signaled_close = any(phrase in msg_lower for phrase in _CLOSING_PHRASES)
     is_close_of_day = (
         today_stats is not None
-        and today_stats['protein'] >= goals['protein']
-        and now.hour >= 18
+        and (user_signaled_close or now.hour >= 18)
     )
     weekly_context = ""
     if weekly_summary and is_close_of_day:
@@ -848,6 +867,7 @@ async def chat(
         today_stats=today_stats,
         today_logs=today_logs,
         weekly_summary=trailing,
+        user_message=text,
     )
 
     # Read image bytes if provided
