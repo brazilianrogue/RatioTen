@@ -649,6 +649,7 @@ Formatting Constraints (Mobile Optimized):
 - The "Density" column must always be displayed as a percentage with exactly one decimal place (e.g., 11.5%, 5.0%).
 - NEVER include Date or Date-Range columns in visible output.
 - Do NOT include today's partial data in any trend table. Today's progress belongs in the inline totals line only.
+- NEVER construct, approximate, or recreate a rolling trend table from conversation history. The trend table is provided by the system — if there is no ROLLING 7-DAY TREND section in this prompt, the table does not exist and must not be displayed.
 - When logging food, display ONE table with columns: Item Name, Cals, Protein, Density.
 - **Source of Truth for Item Table:** The "TODAY'S EXPLICIT FOOD LOGS" section above is the authoritative record of everything logged today (pulled directly from the database). Always include ALL items from that injected list PLUS any new item(s) from the current message. NEVER reconstruct the item list from conversation history alone.
 
