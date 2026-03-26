@@ -24,7 +24,10 @@ from google import genai
 
 import persona
 from constants import (
+    DEFAULT_MODE,
     EASTERN,
+    MODE_BULK,
+    MODE_CUT,
     PRIMARY_MODEL,
     SECONDARY_MODEL,
     STABLE_MODEL,
@@ -107,7 +110,7 @@ DEFAULT_SCHEDULE = {
     "Saturday":  {"start": "12:00", "end": "18:00"},
     "Sunday":    {"start": "12:00", "end": "18:00"},
 }
-DEFAULT_GOALS = {"calories": 1500, "protein": 150}
+DEFAULT_GOALS = {"calories": 1500, "protein": 150, "mode": DEFAULT_MODE}
 
 
 def _read_fasting_schedule() -> dict:
@@ -161,6 +164,11 @@ def _read_user_goals() -> dict:
                 goals["calories"] = int(v)
             elif m == "protein":
                 goals["protein"] = int(v)
+            elif m == "mode":
+                goals["mode"] = str(v).strip().lower() if v else DEFAULT_MODE
+        # Validate mode value
+        if goals["mode"] not in (MODE_CUT, MODE_BULK):
+            goals["mode"] = DEFAULT_MODE
         return goals
     except Exception:
         return DEFAULT_GOALS.copy()
@@ -541,6 +549,7 @@ def build_system_prompt(
     today_logs: Optional[list] = None,
     weekly_summary: Optional[list] = None,
     user_message: str = "",
+    mode: str = DEFAULT_MODE,
 ) -> str:
     now = datetime.now(EASTERN)
     formatted_schedule = "\n".join([
@@ -554,14 +563,18 @@ def build_system_prompt(
 - **Current Time:** {now.strftime("%I:%M %p")} (Eastern Time)
 """
 
+    is_bulk = mode == MODE_BULK
+    cal_label = "Surplus Target" if is_bulk else "Lid"
+    cal_remaining_label = "Surplus Remaining" if is_bulk else "Remaining Calorie Room"
+
     stats_context = ""
     if today_stats:
         stats_context = f"""
 ### CURRENT DAY SITUATION REPORT:
-- **Calories Ingested:** {today_stats['cals']} / {goals['calories']} (Lid)
+- **Calories Ingested:** {today_stats['cals']} / {goals['calories']} ({cal_label})
 - **Protein Ingested:** {today_stats['protein']}g / {goals['protein']}g (Floor)
 - **Current Density:** {today_stats['density']}
-- **Remaining Calorie Room:** {max(0, goals['calories'] - today_stats['cals'])}
+- **{cal_remaining_label}:** {max(0, goals['calories'] - today_stats['cals'])}
 - **Remaining Protein Needed:** {max(0, goals['protein'] - today_stats['protein'])}g
 """
 
@@ -583,30 +596,62 @@ def build_system_prompt(
         protein_done  = today_stats['protein'] >= goals['protein']
         cals_near_lid = today_stats['cals'] >= int(goals['calories'] * 0.88)
         is_evening    = now.hour >= 18
-        if protein_done and is_evening:
-            mode_text = (
-                "CLOSE-OF-DAY MODE: Protein floor is ACHIEVED and it is evening. "
-                "Shift to a warm wrap-up tone. Do NOT suggest eating more protein or additional meals. "
-                "Celebrate the day's wins with a brief, energetic close-of-day summary."
-            )
-        elif protein_done:
-            mode_text = (
-                "PROTEIN COMPLETE: The protein floor has already been hit for today. "
-                "Do NOT suggest more protein sources or pivot strategies. "
-                "Focus coaching on calorie headroom and density quality only."
-            )
-        elif cals_near_lid:
-            mode_text = (
-                "CALORIE CEILING ALERT: Calories are close to the lid. "
-                "Only suggest very high-density, low-calorie protein sources. "
-                "Do not recommend any calorie-heavy foods."
-            )
+
+        if is_bulk:
+            # Bulk mode coaching modes
+            cals_under_target = today_stats['cals'] < int(goals['calories'] * 0.70)
+            if protein_done and is_evening:
+                mode_text = (
+                    "CLOSE-OF-DAY MODE (BULK): Protein floor is ACHIEVED and it is evening. "
+                    "Shift to a warm wrap-up tone. Review whether the calorie surplus target was hit. "
+                    "If surplus was missed, note it as a growth opportunity left on the table. "
+                    "If surplus was hit, celebrate the consistency."
+                )
+            elif protein_done:
+                mode_text = (
+                    "PROTEIN COMPLETE (BULK): The protein floor has been hit. "
+                    "Focus coaching on whether the calorie surplus target is being met. "
+                    "Encourage eating to the target if there's still room."
+                )
+            elif cals_under_target and is_evening:
+                mode_text = (
+                    "CALORIE FLOOR ALERT (BULK): It's evening and calories are significantly "
+                    "under the surplus target. The user is under-fueling for growth. "
+                    "Suggest calorie-dense, protein-rich options to close the gap."
+                )
+            else:
+                mode_text = (
+                    "ACTIVE LOGGING MODE (BULK): Acknowledge the log warmly and show running totals. "
+                    "If protein is behind, suggest high-protein options. "
+                    "If calories are under target, gently encourage eating to fuel growth. "
+                    "Keep the response brief."
+                )
         else:
-            mode_text = (
-                "ACTIVE LOGGING MODE: Acknowledge the log warmly and show the running totals. "
-                "Only suggest upcoming food choices if protein is behind AND less than half the calorie budget remains — "
-                "otherwise just affirm and keep the response brief."
-            )
+            # Cut mode coaching modes (original)
+            if protein_done and is_evening:
+                mode_text = (
+                    "CLOSE-OF-DAY MODE: Protein floor is ACHIEVED and it is evening. "
+                    "Shift to a warm wrap-up tone. Do NOT suggest eating more protein or additional meals. "
+                    "Celebrate the day's wins with a brief, energetic close-of-day summary."
+                )
+            elif protein_done:
+                mode_text = (
+                    "PROTEIN COMPLETE: The protein floor has already been hit for today. "
+                    "Do NOT suggest more protein sources or pivot strategies. "
+                    "Focus coaching on calorie headroom and density quality only."
+                )
+            elif cals_near_lid:
+                mode_text = (
+                    "CALORIE CEILING ALERT: Calories are close to the lid. "
+                    "Only suggest very high-density, low-calorie protein sources. "
+                    "Do not recommend any calorie-heavy foods."
+                )
+            else:
+                mode_text = (
+                    "ACTIVE LOGGING MODE: Acknowledge the log warmly and show the running totals. "
+                    "Only suggest upcoming food choices if protein is behind AND less than half the calorie budget remains — "
+                    "otherwise just affirm and keep the response brief."
+                )
         coaching_mode = f"\n### COACHING MODE (apply this to your response tone and suggestions):\n{mode_text}\n"
 
     # Trigger close-of-day mode when the user signals they're done eating,
@@ -643,13 +688,16 @@ You are the RatioTen Assistant — a knowledgeable, friendly nutrition coach. Yo
 {persona.VOCABULARY}
 {persona.BANTER_INSTRUCTIONS}
 {persona.RESPONSE_TEMPLATES}
-{"" if not is_close_of_day else persona.RELATIONSHIP_CLOSING}
+{"" if not is_close_of_day else (persona.BULK_RELATIONSHIP_CLOSING if is_bulk else persona.RELATIONSHIP_CLOSING)}
+
+{persona.BULK_MODE_CONTEXT if is_bulk else ""}
 
 {time_awareness}
 
 Core Logic:
 - Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
+- **Current Training Mode:** {"BULK (Muscle Growth Phase)" if is_bulk else "CUT (Fat Loss Phase)"}
 
 {stats_context}{coaching_mode}
 {logs_context}
@@ -673,7 +721,7 @@ Formatting Constraints (Mobile Optimized):
 - **Source of Truth for Item Table:** The "TODAY'S EXPLICIT FOOD LOGS" section above is the authoritative record of everything logged today (pulled directly from the database). Always include ALL items from that injected list PLUS any new item(s) from the current message. NEVER reconstruct the item list from conversation history alone.
 
 Response Format After the Item Table:
-- Goals: <= {goals['calories']} cal | >= {goals['protein']}g protein | >= 10.0% density.
+- Goals: {"~" if is_bulk else "<="} {goals['calories']} cal{"" if is_bulk else ""} | >= {goals['protein']}g protein | >= 10.0% density.
 - After the item table, output ONE inline totals line in exactly this format:
   **Cals:** X / {goals['calories']} | **Protein:** Xg / {goals['protein']}g | **Density:** X.X%
 - Then 1–3 sentences of natural conversational response. No headers. No bullet lists. No sub-sections.
@@ -785,6 +833,7 @@ async def dashboard():
         "protein":        protein,
         "density":        density,
         "goals":          goals,
+        "mode":           goals.get("mode", DEFAULT_MODE),
         "lowest_weight":  lowest_weight,
         "weight_history": weight_history,
         "fasting_status": fasting_status,
@@ -862,12 +911,14 @@ async def chat(
     density = f"{(protein / cals * 100):.1f}%" if cals else "0.0%"
     today_stats = {"cals": cals, "protein": protein, "density": density}
 
+    active_mode = goals.get("mode", DEFAULT_MODE)
     system_prompt = build_system_prompt(
         schedule, goals, custom_instr,
         today_stats=today_stats,
         today_logs=today_logs,
         weekly_summary=trailing,
         user_message=text,
+        mode=active_mode,
     )
 
     # Read image bytes if provided
@@ -958,7 +1009,15 @@ async def get_goals():
 
 
 @app.post("/api/goals")
-async def save_goals(calories: int = Form(...), protein: int = Form(...)):
+async def save_goals(
+    calories: int = Form(...),
+    protein: int = Form(...),
+    mode: str = Form(DEFAULT_MODE),
+):
+    # Validate mode
+    clean_mode = mode.strip().lower()
+    if clean_mode not in (MODE_CUT, MODE_BULK):
+        clean_mode = DEFAULT_MODE
     try:
         sh = _get_sh()
         try:
@@ -969,6 +1028,7 @@ async def save_goals(calories: int = Form(...), protein: int = Form(...)):
         ws.append_row(["Metric", "Value"])
         ws.append_row(["Calories", calories])
         ws.append_row(["Protein", protein])
+        ws.append_row(["Mode", clean_mode])
         _invalidate("goals")
         return {"ok": True}
     except Exception as e:
@@ -1008,8 +1068,9 @@ async def analyze():
     wow      = _cached("wow",        300, _read_wow)
     history  = _cached("log_history", 300, lambda: _read_logs_history(10))
 
+    mode = goals.get("mode", DEFAULT_MODE)
     score, err, drivers = calculate_plan_effectiveness(
-        pre_sh=_get_sh(), pre_goals=goals, pre_fasting=schedule
+        pre_sh=_get_sh(), pre_goals=goals, pre_fasting=schedule, mode=mode,
     )
 
     return {
@@ -1018,6 +1079,7 @@ async def analyze():
         "wow":           wow,
         "log_history":   history,
         "schedule":      schedule,
+        "mode":          mode,
     }
 
 
@@ -1025,10 +1087,13 @@ async def analyze():
 async def effectiveness_sync():
     schedule = _cached("schedule", 600, _read_fasting_schedule)
     goals    = _cached("goals",    600, _read_user_goals)
+    mode     = goals.get("mode", DEFAULT_MODE)
     # Run in a thread pool so it doesn't block the event loop
     await asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: sync_plan_effectiveness_logs(force_resync=True, goals=goals, fasting=schedule)
+        lambda: sync_plan_effectiveness_logs(
+            force_resync=True, goals=goals, fasting=schedule, mode=mode,
+        )
     )
     return {"ok": True}
 

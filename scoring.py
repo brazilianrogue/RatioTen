@@ -25,13 +25,25 @@ import pandas as pd
 
 from constants import (
     ADHERENCE_MAX_POINTS,
+    BULK_CAL_FLOOR_BUFFER,
+    BULK_CAL_FULL_POINTS,
+    BULK_CAL_PARTIAL_POINTS,
+    BULK_CAL_SURPLUS_MAX,
+    BULK_WEIGHT_GAIN_EXCESS,
+    BULK_WEIGHT_GAIN_SWEET_MAX,
+    BULK_WEIGHT_GAIN_SWEET_MIN,
+    BULK_WEIGHT_LOSS_PENALTY,
+    BULK_WEIGHT_SCORE_BASE,
+    BULK_WEIGHT_SCORE_MULTIPLIER,
     CAL_FULL_POINTS,
     CAL_PARTIAL_POINTS,
     CALORIE_PARTIAL_BUFFER,
     CALORIE_TARGET_BUFFER,
+    DEFAULT_MODE,
     EASTERN,
     MIN_DAYS_FOR_SCORE,
     MIN_WEIGH_INS_FOR_SCORE,
+    MODE_BULK,
     PROTEIN_FLOOR_FULL_HOURS,
     PROTEIN_FLOOR_MIN_FRACTION,
     PROTEIN_FLOOR_MIN_HOURS,
@@ -66,6 +78,7 @@ def calculate_plan_effectiveness(
     pre_goals: "dict | None" = None,
     pre_fasting: "dict | None" = None,
     demo_mode: bool = False,
+    mode: str = DEFAULT_MODE,
 ) -> "tuple[float | None, str | None, dict | None]":
     """Compute a plan effectiveness score (1–10) for the 14-day window ending on *calc_date*.
 
@@ -98,7 +111,9 @@ def calculate_plan_effectiveness(
         goals = pre_goals
         fasting_schedule = pre_fasting
 
-        target_cal_limit = int(goals.get("calories", 1500)) + CALORIE_TARGET_BUFFER
+        is_bulk = mode == MODE_BULK
+        target_cals = int(goals.get("calories", 1500))
+        target_cal_limit = target_cals + CALORIE_TARGET_BUFFER
         weight_delta = 0.0
 
         thirteen_days_ago = calc_date - timedelta(days=SCORE_WINDOW_DAYS - 1)
@@ -194,13 +209,27 @@ def calculate_plan_effectiveness(
                 sum_cals += nums["cals"]
                 sum_prot += nums["prot"]
 
-                # Calorie points (4 pts)
-                if nums["cals"] <= target_cal_limit:
-                    cal_pts = CAL_FULL_POINTS
-                elif nums["cals"] <= target_cal_limit + CALORIE_PARTIAL_BUFFER:
-                    cal_pts = CAL_PARTIAL_POINTS
+                # Calorie points (4 pts) — mode-dependent
+                if is_bulk:
+                    # Bulk: reward hitting a surplus range (target-100 to target+300)
+                    cal_floor = target_cals - BULK_CAL_FLOOR_BUFFER
+                    cal_ceiling = target_cals + BULK_CAL_SURPLUS_MAX
+                    if cal_floor <= nums["cals"] <= cal_ceiling:
+                        cal_pts = BULK_CAL_FULL_POINTS
+                    elif nums["cals"] > cal_ceiling and nums["cals"] <= cal_ceiling + CALORIE_PARTIAL_BUFFER:
+                        cal_pts = BULK_CAL_PARTIAL_POINTS  # slightly over surplus
+                    elif nums["cals"] < cal_floor and nums["cals"] >= cal_floor - CALORIE_PARTIAL_BUFFER:
+                        cal_pts = BULK_CAL_PARTIAL_POINTS  # slightly under target
+                    else:
+                        cal_pts = 0.0
                 else:
-                    cal_pts = 0.0
+                    # Cut: reward staying under the lid
+                    if nums["cals"] <= target_cal_limit:
+                        cal_pts = CAL_FULL_POINTS
+                    elif nums["cals"] <= target_cal_limit + CALORIE_PARTIAL_BUFFER:
+                        cal_pts = CAL_PARTIAL_POINTS
+                    else:
+                        cal_pts = 0.0
 
                 # Protein points (4 pts)
                 if nums["prot"] >= dynamic_floor:
@@ -344,15 +373,44 @@ def calculate_plan_effectiveness(
             return None, f"Error parsing weight logs: {exc}", drivers
 
         # -----------------------------------------------------------------
-        # 3. Score Calculation
+        # 3. Score Calculation — mode-dependent weight shift scoring
         # -----------------------------------------------------------------
         score = adherence_rate * ADHERENCE_MAX_POINTS
-        if weight_delta >= WEIGHT_LOSS_FULL_THRESHOLD:
-            score += WEIGHT_MAX_POINTS
-        elif weight_delta >= 0:
-            score += WEIGHT_SCORE_BASE + (weight_delta * WEIGHT_SCORE_MULTIPLIER)
-        elif weight_delta < -WEIGHT_GAIN_PENALTY_THRESHOLD:
-            score -= WEIGHT_GAIN_PENALTY
+
+        if is_bulk:
+            # Bulk mode: weight_delta is first_half_min - second_half_min
+            # Negative delta = weight GAINED (good in bulk)
+            weight_gain = -weight_delta  # flip sign: positive = gained
+            if BULK_WEIGHT_GAIN_SWEET_MIN <= weight_gain <= BULK_WEIGHT_GAIN_SWEET_MAX:
+                # Sweet spot — full points
+                score += WEIGHT_MAX_POINTS
+            elif weight_gain > BULK_WEIGHT_GAIN_SWEET_MAX:
+                if weight_gain >= BULK_WEIGHT_GAIN_EXCESS:
+                    # Excessive gain — partial credit only
+                    score += BULK_WEIGHT_SCORE_BASE
+                else:
+                    # Above sweet spot but not excessive — scale down
+                    frac = 1.0 - (weight_gain - BULK_WEIGHT_GAIN_SWEET_MAX) / (
+                        BULK_WEIGHT_GAIN_EXCESS - BULK_WEIGHT_GAIN_SWEET_MAX
+                    )
+                    score += BULK_WEIGHT_SCORE_BASE + frac * (WEIGHT_MAX_POINTS - BULK_WEIGHT_SCORE_BASE)
+            elif 0 < weight_gain < BULK_WEIGHT_GAIN_SWEET_MIN:
+                # Some gain but below sweet spot — partial credit
+                frac = weight_gain / BULK_WEIGHT_GAIN_SWEET_MIN
+                score += BULK_WEIGHT_SCORE_BASE + frac * (WEIGHT_MAX_POINTS - BULK_WEIGHT_SCORE_BASE)
+            elif weight_gain <= 0:
+                # Lost weight while bulking — not fueling growth
+                if weight_gain < -0.5:
+                    score -= BULK_WEIGHT_LOSS_PENALTY
+                # No penalty for staying flat (0 to -0.5)
+        else:
+            # Cut mode: original logic — reward weight loss
+            if weight_delta >= WEIGHT_LOSS_FULL_THRESHOLD:
+                score += WEIGHT_MAX_POINTS
+            elif weight_delta >= 0:
+                score += WEIGHT_SCORE_BASE + (weight_delta * WEIGHT_SCORE_MULTIPLIER)
+            elif weight_delta < -WEIGHT_GAIN_PENALTY_THRESHOLD:
+                score -= WEIGHT_GAIN_PENALTY
 
         score = max(SCORE_MIN, min(SCORE_MAX, score))
         return score, None, drivers
@@ -366,6 +424,7 @@ def sync_plan_effectiveness_logs(
     goals: "dict | None" = None,
     fasting: "dict | None" = None,
     demo_mode: bool = False,
+    mode: str = DEFAULT_MODE,
 ) -> None:
     """Backfill and update daily plan effectiveness scores in Google Sheets.
 
@@ -396,7 +455,7 @@ def sync_plan_effectiveness_logs(
             log_ws = sh.worksheet(WS_PLAN_EFFECTIVENESS)
         except gspread.WorksheetNotFound:
             log_ws = sh.add_worksheet(
-                title=WS_PLAN_EFFECTIVENESS, rows="100", cols="7"
+                title=WS_PLAN_EFFECTIVENESS, rows="100", cols="8"
             )
             log_ws.append_row(
                 [
@@ -407,6 +466,7 @@ def sync_plan_effectiveness_logs(
                     "Ad Score",
                     "Weight Shift",
                     "Plan Score",
+                    "Mode",
                 ]
             )
 
@@ -430,6 +490,7 @@ def sync_plan_effectiveness_logs(
                     pre_sh=sh,
                     pre_goals=goals,
                     pre_fasting=fasting,
+                    mode=mode,
                 )
 
                 if drivers:
@@ -453,12 +514,13 @@ def sync_plan_effectiveness_logs(
                         round(day_ad_score, 2),
                         round(weight_shift, 2),
                         round(final_score, 2),
+                        mode,
                     ]
 
                     if date_str in date_row_map:
                         if force_resync:
                             log_ws.update(
-                                f"A{date_row_map[date_str]}:G{date_row_map[date_str]}",
+                                f"A{date_row_map[date_str]}:H{date_row_map[date_str]}",
                                 [row_content],
                             )
                     else:

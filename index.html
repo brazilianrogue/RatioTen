@@ -378,6 +378,45 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   background:none; padding:0; font-family:var(--font);
 }
 .decide-link:hover { text-decoration:underline; }
+
+/* ── Mode Toggle ─────────────────────────────────────────────────────── */
+.mode-toggle-container {
+  background: var(--card); border-radius: 14px; padding: 16px 18px;
+  margin-bottom: 16px; border: 1px solid var(--border);
+}
+.mode-toggle-label {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); margin-bottom: 10px; font-weight: 600;
+}
+.mode-toggle-track {
+  position: relative; display: flex; align-items: center;
+  background: var(--bg); border-radius: 10px; height: 44px;
+  cursor: pointer; overflow: hidden; border: 1px solid var(--border);
+}
+.mode-toggle-option {
+  flex: 1; text-align: center; font-size: 0.8rem; font-weight: 700;
+  letter-spacing: 0.1em; z-index: 1; transition: color 0.3s ease;
+  user-select: none;
+}
+.mode-cut-label { color: var(--green); }
+.mode-bulk-label { color: var(--muted); }
+.mode-toggle-track.bulk .mode-cut-label { color: var(--muted); }
+.mode-toggle-track.bulk .mode-bulk-label { color: var(--blue); }
+.mode-toggle-thumb {
+  position: absolute; top: 3px; left: 3px;
+  width: calc(50% - 3px); height: 38px;
+  background: var(--card); border-radius: 8px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.mode-toggle-track.bulk .mode-toggle-thumb {
+  transform: translateX(100%);
+}
+.mode-toggle-desc {
+  font-size: 0.72rem; color: var(--muted); margin-top: 8px;
+  text-align: center; transition: opacity 0.2s;
+}
+
 /* ── Help Me Decide modal ─────────────────────────────────────────────── */
 .modal-overlay {
   position:fixed; inset:0; background:rgba(0,0,0,0.65);
@@ -728,6 +767,17 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
 
   <!-- PLAN VIEW -->
   <div id="view-plan" class="view">
+    <!-- Mode Toggle -->
+    <div class="mode-toggle-container">
+      <div class="mode-toggle-label">Training Mode</div>
+      <div class="mode-toggle-track" id="mode-toggle" onclick="toggleMode()">
+        <div class="mode-toggle-option mode-cut-label" id="mode-cut-label">CUT</div>
+        <div class="mode-toggle-option mode-bulk-label" id="mode-bulk-label">BULK</div>
+        <div class="mode-toggle-thumb" id="mode-thumb"></div>
+      </div>
+      <div class="mode-toggle-desc" id="mode-desc">Fat loss &amp; muscle preservation</div>
+    </div>
+
     <div class="section-hdr">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
       Daily Targets
@@ -866,6 +916,7 @@ const ICON_CLEAR  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 // ── State ──────────────────────────────────────────────────────────────────
 const state = {
   view:          'log',
+  mode:          'cut',  // 'cut' or 'bulk'
   timerHandle:   null,
   targetTs:      null,
   fastingStatus: '',
@@ -1022,6 +1073,10 @@ async function loadDashboard() {
         `${parseFloat(dash.lowest_weight).toFixed(1)} lbs`;
     }
 
+    // Mode awareness
+    const dashMode = dash.mode || 'cut';
+    state.mode = dashMode;
+
     // Metric cards
     const goals = dash.goals;
     const cals  = dash.cals;
@@ -1033,8 +1088,14 @@ async function loadDashboard() {
 
     const calsLeft = goals.calories - cals;
     const calsEl   = document.getElementById('m-cals-delta');
-    calsEl.textContent  = calsLeft >= 0 ? `${fmt(calsLeft)} left` : `${fmt(-calsLeft)} over`;
-    calsEl.className    = 'card-delta ' + (calsLeft >= 0 ? 'delta-green' : 'delta-red');
+    if (dashMode === 'bulk') {
+      // In bulk mode: under target = needs more, over is acceptable
+      calsEl.textContent  = calsLeft >= 0 ? `${fmt(calsLeft)} to target` : `${fmt(-calsLeft)} over target`;
+      calsEl.className    = 'card-delta ' + (calsLeft <= 0 ? 'delta-ok' : 'delta-green');
+    } else {
+      calsEl.textContent  = calsLeft >= 0 ? `${fmt(calsLeft)} left` : `${fmt(-calsLeft)} over`;
+      calsEl.className    = 'card-delta ' + (calsLeft >= 0 ? 'delta-green' : 'delta-red');
+    }
 
     const protLeft = goals.protein - prot;
     const protEl   = document.getElementById('m-prot-delta');
@@ -1586,12 +1647,56 @@ function renderCharts(trailing, wow) {
 // ── Plan view ──────────────────────────────────────────────────────────────
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
+// ── Mode toggle ──────────────────────────────────────────────────────────
+function setModeUI(mode) {
+  state.mode = mode;
+  const track = document.getElementById('mode-toggle');
+  const desc  = document.getElementById('mode-desc');
+  const calLabel = document.querySelector('#view-plan .form-label');
+  if (mode === 'bulk') {
+    track.classList.add('bulk');
+    desc.innerHTML = 'Lean muscle growth &amp; controlled surplus';
+    if (calLabel) calLabel.textContent = 'Calorie Target';
+  } else {
+    track.classList.remove('bulk');
+    desc.innerHTML = 'Fat loss &amp; muscle preservation';
+    if (calLabel) calLabel.textContent = 'Calorie Lid';
+  }
+  // Update dashboard labels
+  updateDashLabels(mode);
+}
+
+function updateDashLabels(mode) {
+  const calDelta = document.getElementById('m-cals-delta');
+  if (!calDelta) return;
+  // Re-run dashboard label logic on next load — for now, just tag for awareness
+}
+
+async function toggleMode() {
+  const newMode = state.mode === 'cut' ? 'bulk' : 'cut';
+  setModeUI(newMode);
+  // Persist immediately — save current goals with new mode
+  const fd = new FormData();
+  fd.append('calories', document.getElementById('goal-cals').value);
+  fd.append('protein',  document.getElementById('goal-prot').value);
+  fd.append('mode',     newMode);
+  try {
+    await fetch('/api/goals', { method: 'POST', body: fd });
+  } catch(e) {
+    console.error('Failed to save mode:', e);
+  }
+}
+
 // ── Help Me Decide modal ───────────────────────────────────────────────────
 let _decideSex = 'male';
 
 function openDecideModal() {
   document.getElementById('decide-modal').classList.remove('hidden');
   document.getElementById('decide-error').style.display = 'none';
+  // Pre-select goal based on current mode
+  const defaultGoal = state.mode === 'bulk' ? 'muscle' : 'lose';
+  const radio = document.querySelector(`input[name="decide-goal"][value="${defaultGoal}"]`);
+  if (radio) radio.checked = true;
 }
 function closeDecideModal() {
   document.getElementById('decide-modal').classList.add('hidden');
@@ -1631,9 +1736,9 @@ function calcAndSet() {
     targetCals = Math.max(1200, Math.round((tdee - 600) / 100) * 100);
     targetProt = Math.round(weightLbs / 10) * 10;        // 1 g/lb
   } else if (goal === 'muscle') {
-    // ~300 kcal surplus for lean bulk; moderate protein sufficient with surplus
+    // ~300 kcal surplus for lean bulk; 1 g/lb protein for MPS
     targetCals = Math.round((tdee + 300) / 100) * 100;
-    targetProt = Math.round(weightLbs * 0.8 / 10) * 10; // 0.8 g/lb
+    targetProt = Math.round(weightLbs / 10) * 10;        // 1 g/lb
   } else {
     // Recomp: near-maintenance slight deficit; very high protein drives simultaneous changes
     targetCals = Math.round((tdee - 150) / 100) * 100;
@@ -1678,6 +1783,7 @@ async function loadPlan() {
     ]);
     setGoalDisplay('cals', goals.calories || 2000);
     setGoalDisplay('prot', goals.protein  || 150);
+    setModeUI(goals.mode || 'cut');
     updateDensityHint();
     buildSchedForm(sched);
   } catch(e) {}
@@ -1696,6 +1802,7 @@ async function saveGoals() {
   const fd = new FormData();
   fd.append('calories', document.getElementById('goal-cals').value);
   fd.append('protein',  document.getElementById('goal-prot').value);
+  fd.append('mode',     state.mode);
   try {
     await fetch('/api/goals', { method:'POST', body:fd });
     showMsg('goals-msg', '✅ Saved', 'var(--green)');

@@ -28,6 +28,16 @@ WEIGHT_GAIN_PENALTY = 2.0           # Points deducted for excessive weight gain
 WEIGHT_MAX_POINTS = 5.0             # Maximum points from the weight shift component
 
 # ---------------------------------------------------------------------------
+# Scoring: Weight Shift Component — BULK MODE (0–5 pts)
+# ---------------------------------------------------------------------------
+BULK_WEIGHT_GAIN_SWEET_MIN = 0.25   # Minimum weekly lbs gained for full weight score
+BULK_WEIGHT_GAIN_SWEET_MAX = 1.0    # Maximum weekly lbs gained for full weight score
+BULK_WEIGHT_GAIN_EXCESS = 1.5       # Lbs gained above which excessive-gain penalty applies
+BULK_WEIGHT_LOSS_PENALTY = 2.0      # Points deducted for losing weight while bulking
+BULK_WEIGHT_SCORE_BASE = 2.0        # Points for minimal gain (0–0.24 lbs)
+BULK_WEIGHT_SCORE_MULTIPLIER = 12.0 # Scales 0.25–1.0 lb gain range to 2.0–5.0 pts
+
+# ---------------------------------------------------------------------------
 # Scoring: Daily Adherence Points (per day, out of 10)
 # ---------------------------------------------------------------------------
 CALORIE_TARGET_BUFFER = 100         # Extra cals allowed above target for full calorie points
@@ -39,6 +49,14 @@ PROTEIN_PARTIAL_POINTS = 2.0        # Points for reaching 80 % of the protein fl
 TIMING_FULL_POINTS = 2.0            # Points for all meals within the eating window
 TIMING_BUFFER_HOURS = 1             # Grace-period (hours) around eating-window edges
 ADHERENCE_MAX_POINTS = 5.0          # Maximum points from the adherence component
+
+# ---------------------------------------------------------------------------
+# Scoring: Daily Adherence Points — BULK MODE (per day, out of 10)
+# ---------------------------------------------------------------------------
+BULK_CAL_FLOOR_BUFFER = 100         # Can be under calorie target by this much for full pts
+BULK_CAL_SURPLUS_MAX = 300          # Can be over calorie target by this much for full pts
+BULK_CAL_FULL_POINTS = 4.0         # Points for hitting the calorie surplus range
+BULK_CAL_PARTIAL_POINTS = 2.0      # Points for being close to the surplus range
 
 # ---------------------------------------------------------------------------
 # Scoring: Dynamic Protein Floor
@@ -63,6 +81,13 @@ SCORE_BACKFILL_DAYS = 14            # Default backfill range (days before today)
 SCORE_FORCE_BACKFILL_DAYS = 21      # Extended backfill range on force-resync
 SCORE_MAX_DAYS_PER_RUN = 20         # Maximum dates processed per sync run
 SCORE_APPEND_SLEEP = 1.0            # Seconds to sleep between sheet appends (rate-limit guard)
+
+# ---------------------------------------------------------------------------
+# Training Modes
+# ---------------------------------------------------------------------------
+MODE_CUT = "cut"
+MODE_BULK = "bulk"
+DEFAULT_MODE = MODE_CUT
 
 # ---------------------------------------------------------------------------
 # Timeline Layout
