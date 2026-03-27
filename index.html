@@ -895,6 +895,38 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   </div>
 </div>
 
+<!-- ── Recalibrate targets modal (shown on mode toggle) ───────────────────── -->
+<div id="recalibrate-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeRecalibrateModal()">
+  <div class="modal-card">
+    <div class="modal-hdr">
+      <span class="modal-title" id="recalibrate-title">Switch to Bulk Mode</span>
+      <button class="modal-close" onclick="closeRecalibrateModal()">×</button>
+    </div>
+
+    <div style="padding: 0 20px; text-align: center;">
+      <p id="recalibrate-msg" style="margin-bottom: 20px; line-height: 1.5; color: var(--text);">
+        Your training mode has changed. Your calorie and protein targets should be recalibrated for this phase.
+      </p>
+      <div style="background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 16px; text-align: left; font-size: 0.9rem; line-height: 1.6;">
+        <strong style="color: var(--blue);">Bulk Phase:</strong>
+        <ul style="margin: 8px 0 0 16px;">
+          <li>Target a moderate calorie surplus (~300–500 kcal/day)</li>
+          <li>Protein: 1g per lb of body weight</li>
+          <li>Aim for ~0.5–1.0 lb/week weight gain</li>
+        </ul>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 20px;">
+        Use <strong>Help Me Decide</strong> to get personalized calorie and protein recommendations.
+      </p>
+    </div>
+
+    <div style="display: flex; gap: 10px; padding: 0 20px;">
+      <button class="save-btn" style="flex: 1;" onclick="closeRecalibrateModal()">Continue</button>
+      <button class="save-btn" style="flex: 1; background: var(--blue); border-color: var(--blue);" onclick="openDecideModalFromRecalibrate()">Help Me Decide</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Fixed input bar ───────────────────────────────────────────────────── -->
 <footer id="input-bar">
   <img id="img-preview" src="" alt="photo">
@@ -1682,9 +1714,36 @@ async function toggleMode() {
   fd.append('mode',     newMode);
   try {
     await fetch('/api/goals', { method: 'POST', body: fd });
+    // Show recalibrate prompt after mode is saved
+    showRecalibrateModal(newMode);
   } catch(e) {
     console.error('Failed to save mode:', e);
   }
+}
+
+// ── Recalibrate modal ──────────────────────────────────────────────────────
+function showRecalibrateModal(mode) {
+  const title = document.getElementById('recalibrate-title');
+  const msg = document.getElementById('recalibrate-msg');
+
+  if (mode === 'bulk') {
+    title.textContent = 'Switch to Bulk Mode';
+    msg.textContent = 'Your training mode has changed. Your calorie and protein targets should be recalibrated for lean muscle growth.';
+  } else {
+    title.textContent = 'Switch to Cut Mode';
+    msg.textContent = 'Your training mode has changed. Your calorie and protein targets should be recalibrated for fat loss while preserving muscle.';
+  }
+
+  document.getElementById('recalibrate-modal').classList.remove('hidden');
+}
+
+function closeRecalibrateModal() {
+  document.getElementById('recalibrate-modal').classList.add('hidden');
+}
+
+function openDecideModalFromRecalibrate() {
+  closeRecalibrateModal();
+  openDecideModal();
 }
 
 // ── Help Me Decide modal ───────────────────────────────────────────────────
