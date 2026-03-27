@@ -417,6 +417,21 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   text-align: center; transition: opacity 0.2s;
 }
 
+/* ── Profile & Targets modal ─────────────────────────────────────────── */
+.adjust-link {
+  display:block; text-align:center; font-size:0.85rem; color:var(--muted);
+  text-decoration:underline; cursor:pointer; margin:6px 0 4px;
+  background:none; border:none; width:100%; padding:4px;
+}
+.adjust-link:hover { color:var(--text); }
+.modal-action-row { display:flex; gap:10px; margin-top:12px; }
+.modal-action-row .save-btn { flex:1; margin-top:0; }
+.modal-btn-secondary {
+  flex:1; padding:13px; border-radius:12px; border:1px solid var(--border);
+  background:var(--card2); color:var(--text); font-size:1rem; font-weight:700;
+  cursor:pointer; transition:opacity 0.2s;
+}
+.modal-btn-secondary:active { opacity:0.7; }
 /* ── Help Me Decide modal ─────────────────────────────────────────────── */
 .modal-overlay {
   position:fixed; inset:0; background:rgba(0,0,0,0.65);
@@ -803,7 +818,7 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       </div>
     </div>
     <div class="density-hint" id="density-hint">Target density: 10.0%</div>
-    <button class="decide-link" onclick="openDecideModal()">Help me decide →</button>
+    <button class="decide-link" onclick="openProfileModal(null)">Help me decide →</button>
     <button class="save-btn" onclick="saveGoals()" style="margin-top:10px">Save Targets</button>
     <div class="save-msg" id="goals-msg"></div>
 
@@ -836,93 +851,73 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
 
 </main>
 
-<!-- ── Help Me Decide modal ─────────────────────────────────────────────── -->
-<div id="decide-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeDecideModal()">
+<!-- ── Profile & Targets modal ────────────────────────────────────────────── -->
+<div id="profile-modal" class="modal-overlay hidden" onclick="if(event.target===this)cancelModeSwitch()">
   <div class="modal-card">
     <div class="modal-hdr">
-      <span class="modal-title">Help Me Decide</span>
-      <button class="modal-close" onclick="closeDecideModal()">×</button>
+      <span class="modal-title" id="profile-modal-title">Switch to Bulk Mode</span>
+      <button class="modal-close" onclick="cancelModeSwitch()">×</button>
     </div>
 
-    <span class="modal-section-lbl">I'm looking to</span>
-    <div class="goal-opts">
-      <label class="goal-opt">
-        <input type="radio" name="decide-goal" value="lose" checked>
-        <div class="goal-opt-dot"></div>
-        <span class="goal-opt-lbl">Lose weight primarily</span>
-      </label>
-      <label class="goal-opt">
-        <input type="radio" name="decide-goal" value="muscle">
-        <div class="goal-opt-dot"></div>
-        <span class="goal-opt-lbl">Add muscle primarily</span>
-      </label>
-      <label class="goal-opt">
-        <input type="radio" name="decide-goal" value="both">
-        <div class="goal-opt-dot"></div>
-        <span class="goal-opt-lbl">Both if possible</span>
-      </label>
-    </div>
-
-    <div class="decide-fields">
-      <div class="decide-field full">
-        <span class="modal-section-lbl">Biological sex</span>
-        <div class="sex-toggle">
-          <button class="sex-btn active" id="sex-male" onclick="setSex('male')">Male</button>
-          <button class="sex-btn" id="sex-female" onclick="setSex('female')">Female</button>
+    <!-- Targets section — shown when profile is populated -->
+    <div id="profile-targets-section" style="display:none">
+      <p id="profile-targets-msg" style="font-size:0.88rem;color:var(--muted);margin-bottom:14px;line-height:1.5;"></p>
+      <div id="profile-guidance" style="background:var(--card);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:0.85rem;line-height:1.6;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">
+        <div class="form-group">
+          <label class="form-label" id="modal-cals-label">Calorie Target</label>
+          <div class="stepper">
+            <button class="stepper-btn" onclick="stepModalGoal('cals',-100)">−</button>
+            <span class="stepper-val" id="modal-cals-val">2,000 kcal</span>
+            <input type="hidden" id="modal-cals" value="2000">
+            <button class="stepper-btn" onclick="stepModalGoal('cals',100)">+</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Protein Floor</label>
+          <div class="stepper">
+            <button class="stepper-btn" onclick="stepModalGoal('prot',-10)">−</button>
+            <span class="stepper-val" id="modal-prot-val">150g</span>
+            <input type="hidden" id="modal-prot" value="150">
+            <button class="stepper-btn" onclick="stepModalGoal('prot',10)">+</button>
+          </div>
         </div>
       </div>
-      <div class="decide-field full">
-        <span class="modal-section-lbl">Height</span>
-        <div class="height-wrap">
-          <input type="number" id="decide-ft" class="decide-input" min="3" max="8" placeholder="5" style="max-width:70px">
-          <span class="height-lbl">ft</span>
-          <input type="number" id="decide-in" class="decide-input" min="0" max="11" placeholder="10" style="max-width:70px">
-          <span class="height-lbl">in</span>
+      <button class="adjust-link" onclick="expandProfileFields()">Adjust my profile first</button>
+    </div>
+
+    <!-- Profile fields — shown for first-time setup or when expanding to edit -->
+    <div id="profile-fields-section">
+      <span class="modal-section-lbl">Biological sex</span>
+      <div class="sex-toggle" style="margin-bottom:14px;">
+        <button class="sex-btn active" id="pf-sex-male" onclick="setProfileSex('male')">Male</button>
+        <button class="sex-btn" id="pf-sex-female" onclick="setProfileSex('female')">Female</button>
+      </div>
+      <span class="modal-section-lbl">Height</span>
+      <div class="height-wrap" style="margin-bottom:14px;">
+        <input type="number" id="pf-ft" class="decide-input" min="3" max="8" placeholder="5" style="max-width:70px">
+        <span class="height-lbl">ft</span>
+        <input type="number" id="pf-in" class="decide-input" min="0" max="11" placeholder="7" style="max-width:70px">
+        <span class="height-lbl">in</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+        <div>
+          <span class="modal-section-lbl">Age</span>
+          <input type="number" id="pf-age" class="decide-input" min="14" max="100" placeholder="30">
+        </div>
+        <div>
+          <span class="modal-section-lbl">Weight (lbs)</span>
+          <input type="number" id="pf-weight" class="decide-input" min="80" max="500" placeholder="170">
         </div>
       </div>
-      <div class="decide-field">
-        <span class="modal-section-lbl">Age</span>
-        <input type="number" id="decide-age" class="decide-input" min="14" max="100" placeholder="30">
-      </div>
-      <div class="decide-field">
-        <span class="modal-section-lbl">Weight (lbs)</span>
-        <input type="number" id="decide-weight" class="decide-input" min="80" max="500" placeholder="170">
-      </div>
+      <div id="pf-error" style="font-size:0.8rem;color:var(--red);margin-bottom:8px;display:none"></div>
+      <button class="save-btn" onclick="saveProfileFromModal()">Save Profile</button>
     </div>
 
-    <div id="decide-error" style="font-size:0.8rem;color:var(--red);margin-bottom:10px;display:none"></div>
-    <button class="save-btn" onclick="calcAndSet()">Calculate and Set</button>
-  </div>
-</div>
-
-<!-- ── Recalibrate targets modal (shown on mode toggle) ───────────────────── -->
-<div id="recalibrate-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeRecalibrateModal()">
-  <div class="modal-card">
-    <div class="modal-hdr">
-      <span class="modal-title" id="recalibrate-title">Switch to Bulk Mode</span>
-      <button class="modal-close" onclick="closeRecalibrateModal()">×</button>
-    </div>
-
-    <div style="padding: 0 20px; text-align: center;">
-      <p id="recalibrate-msg" style="margin-bottom: 20px; line-height: 1.5; color: var(--text);">
-        Your training mode has changed. Your calorie and protein targets should be recalibrated for this phase.
-      </p>
-      <div style="background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 16px; text-align: left; font-size: 0.9rem; line-height: 1.6;">
-        <strong style="color: var(--blue);">Bulk Phase:</strong>
-        <ul style="margin: 8px 0 0 16px;">
-          <li>Target a moderate calorie surplus (~300–500 kcal/day)</li>
-          <li>Protein: 1g per lb of body weight</li>
-          <li>Aim for ~0.5–1.0 lb/week weight gain</li>
-        </ul>
-      </div>
-      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 20px;">
-        Use <strong>Help Me Decide</strong> to get personalized calorie and protein recommendations.
-      </p>
-    </div>
-
-    <div style="display: flex; gap: 10px; padding: 0 20px;">
-      <button class="save-btn" style="flex: 1;" onclick="closeRecalibrateModal()">Continue</button>
-      <button class="save-btn" style="flex: 1; background: var(--blue); border-color: var(--blue);" onclick="openDecideModalFromRecalibrate()">Help Me Decide</button>
+    <!-- Action buttons — shown once targets are displayed -->
+    <div id="profile-action-buttons" class="modal-action-row" style="display:none;">
+      <button class="modal-btn-secondary" onclick="cancelModeSwitch()">Cancel</button>
+      <button class="save-btn" style="margin-top:0;" onclick="confirmModeSwitch()">Looks good, set it</button>
     </div>
   </div>
 </div>
@@ -1704,114 +1699,168 @@ function updateDashLabels(mode) {
   // Re-run dashboard label logic on next load — for now, just tag for awareness
 }
 
-async function toggleMode() {
+function toggleMode() {
   const newMode = state.mode === 'cut' ? 'bulk' : 'cut';
+  // Update toggle visual immediately; modal confirms before saving
   setModeUI(newMode);
-  // Persist immediately — save current goals with new mode
-  const fd = new FormData();
-  fd.append('calories', document.getElementById('goal-cals').value);
-  fd.append('protein',  document.getElementById('goal-prot').value);
-  fd.append('mode',     newMode);
-  try {
-    await fetch('/api/goals', { method: 'POST', body: fd });
-    // Show recalibrate prompt after mode is saved
-    showRecalibrateModal(newMode);
-  } catch(e) {
-    console.error('Failed to save mode:', e);
-  }
+  openProfileModal(newMode);
 }
 
-// ── Recalibrate modal ──────────────────────────────────────────────────────
-function showRecalibrateModal(mode) {
-  const title = document.getElementById('recalibrate-title');
-  const msg = document.getElementById('recalibrate-msg');
+// ── Bio Profile (localStorage) ─────────────────────────────────────────────
+const BIO_PROFILE_KEY = 'rt_bio_profile';
+let _pendingMode = null;   // mode awaiting confirmation; null = standalone (Help Me Decide)
+let _profileSex  = 'male';
 
-  if (mode === 'bulk') {
-    title.textContent = 'Switch to Bulk Mode';
-    msg.textContent = 'Your training mode has changed. Your calorie and protein targets should be recalibrated for lean muscle growth.';
+function loadBioProfile() {
+  try { return JSON.parse(localStorage.getItem(BIO_PROFILE_KEY)); } catch(e) { return null; }
+}
+function saveBioProfile(p) {
+  localStorage.setItem(BIO_PROFILE_KEY, JSON.stringify(p));
+}
+
+function calcTargetsFromProfile(profile, mode) {
+  const { sex, heightFt, heightIn, age, weightLbs } = profile;
+  const weightKg = weightLbs / 2.205;
+  const heightCm = (heightFt * 12 + (heightIn || 0)) * 2.54;
+  const bmr = sex === 'female'
+    ? 10 * weightKg + 6.25 * heightCm - 5 * age - 161
+    : 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+  const tdee = bmr * 1.45;
+  let cals = mode === 'bulk'
+    ? Math.round((tdee + 300) / 100) * 100
+    : Math.max(1200, Math.round((tdee - 600) / 100) * 100);
+  let prot = Math.round(weightLbs / 10) * 10; // 1 g/lb
+  return {
+    cals: Math.min(5000, Math.max(500, cals)),
+    prot: Math.min(500,  Math.max(20,  prot)),
+  };
+}
+
+// Modal-internal steppers
+const MODAL_STEPPER_CFG = {
+  cals: { min:500, max:5000, step:100, fmt: v => v.toLocaleString() + ' kcal' },
+  prot: { min:20,  max:500,  step:10,  fmt: v => v + 'g' },
+};
+function setModalGoalDisplay(id, val) {
+  const cfg = MODAL_STEPPER_CFG[id];
+  val = Math.min(cfg.max, Math.max(cfg.min, val));
+  document.getElementById('modal-' + id).value = val;
+  document.getElementById('modal-' + id + '-val').textContent = cfg.fmt(val);
+}
+function stepModalGoal(id, delta) {
+  setModalGoalDisplay(id, parseInt(document.getElementById('modal-' + id).value) + delta);
+}
+
+// ── Profile & Targets modal ────────────────────────────────────────────────
+function setProfileSex(s) {
+  _profileSex = s;
+  document.getElementById('pf-sex-male').classList.toggle('active',   s === 'male');
+  document.getElementById('pf-sex-female').classList.toggle('active', s === 'female');
+}
+
+function openProfileModal(pendingMode) {
+  // pendingMode = 'cut'/'bulk' when switching; null when opened standalone (Help Me Decide)
+  _pendingMode = pendingMode;
+  const targetMode = pendingMode ?? state.mode;
+  const modeLabel  = targetMode === 'bulk' ? 'Bulk' : 'Cut';
+  document.getElementById('profile-modal-title').textContent =
+    pendingMode ? `Switch to ${modeLabel} Mode` : 'Recalculate Targets';
+
+  const profile = loadBioProfile();
+  if (profile) {
+    prefillProfileFields(profile);
+    showTargetsConfirm(profile, targetMode);
   } else {
-    title.textContent = 'Switch to Cut Mode';
-    msg.textContent = 'Your training mode has changed. Your calorie and protein targets should be recalibrated for fat loss while preserving muscle.';
+    showProfileSetup();
   }
-
-  document.getElementById('recalibrate-modal').classList.remove('hidden');
+  document.getElementById('profile-modal').classList.remove('hidden');
 }
 
-function closeRecalibrateModal() {
-  document.getElementById('recalibrate-modal').classList.add('hidden');
+function prefillProfileFields(profile) {
+  _profileSex = profile.sex || 'male';
+  setProfileSex(_profileSex);
+  document.getElementById('pf-ft').value     = profile.heightFt ?? '';
+  document.getElementById('pf-in').value     = profile.heightIn ?? '';
+  document.getElementById('pf-age').value    = profile.age      ?? '';
+  document.getElementById('pf-weight').value = profile.weightLbs ?? '';
 }
 
-function openDecideModalFromRecalibrate() {
-  closeRecalibrateModal();
-  openDecideModal();
+function showProfileSetup() {
+  document.getElementById('profile-targets-section').style.display  = 'none';
+  document.getElementById('profile-fields-section').style.display   = 'block';
+  document.getElementById('profile-action-buttons').style.display   = 'none';
+  document.getElementById('pf-error').style.display = 'none';
 }
 
-// ── Help Me Decide modal ───────────────────────────────────────────────────
-let _decideSex = 'male';
-
-function openDecideModal() {
-  document.getElementById('decide-modal').classList.remove('hidden');
-  document.getElementById('decide-error').style.display = 'none';
-  // Pre-select goal based on current mode
-  const defaultGoal = state.mode === 'bulk' ? 'muscle' : 'lose';
-  const radio = document.querySelector(`input[name="decide-goal"][value="${defaultGoal}"]`);
-  if (radio) radio.checked = true;
-}
-function closeDecideModal() {
-  document.getElementById('decide-modal').classList.add('hidden');
-}
-function setSex(s) {
-  _decideSex = s;
-  document.getElementById('sex-male').classList.toggle('active', s === 'male');
-  document.getElementById('sex-female').classList.toggle('active', s === 'female');
+function showTargetsConfirm(profile, mode) {
+  const targets   = calcTargetsFromProfile(profile, mode);
+  const modeLabel = mode === 'bulk' ? 'Bulk' : 'Cut';
+  document.getElementById('profile-targets-msg').textContent =
+    `Recommended targets for ${modeLabel} mode based on your profile. Adjust if needed.`;
+  document.getElementById('profile-guidance').innerHTML = mode === 'bulk'
+    ? `<strong style="color:var(--blue)">Bulk Phase:</strong> Moderate surplus for lean muscle growth. Target ~0.5–1.0 lb/week gain.`
+    : `<strong style="color:var(--accent)">Cut Phase:</strong> ~600 kcal deficit for ~1.2 lbs/week fat loss while preserving muscle.`;
+  document.getElementById('modal-cals-label').textContent = mode === 'bulk' ? 'Calorie Floor' : 'Calorie Lid';
+  setModalGoalDisplay('cals', targets.cals);
+  setModalGoalDisplay('prot', targets.prot);
+  document.getElementById('profile-targets-section').style.display  = 'block';
+  document.getElementById('profile-fields-section').style.display   = 'none';
+  document.getElementById('profile-action-buttons').style.display   = 'flex';
 }
 
-function calcAndSet() {
-  const weightLbs = parseFloat(document.getElementById('decide-weight').value);
-  const ft        = parseFloat(document.getElementById('decide-ft').value) || 0;
-  const inches    = parseFloat(document.getElementById('decide-in').value) || 0;
-  const age       = parseFloat(document.getElementById('decide-age').value);
-  const goal      = document.querySelector('input[name="decide-goal"]:checked').value;
+function expandProfileFields() {
+  document.getElementById('profile-fields-section').style.display = 'block';
+  const card = document.querySelector('#profile-modal .modal-card');
+  setTimeout(() => card.scrollTo({ top: card.scrollHeight, behavior: 'smooth' }), 50);
+}
 
-  const errEl = document.getElementById('decide-error');
-  if (!weightLbs || !age || (!ft && !inches)) {
-    errEl.textContent = 'Please fill in weight, height, and age.';
+function saveProfileFromModal() {
+  const ft        = parseFloat(document.getElementById('pf-ft').value);
+  const heightIn  = parseFloat(document.getElementById('pf-in').value) || 0;
+  const age       = parseFloat(document.getElementById('pf-age').value);
+  const weightLbs = parseFloat(document.getElementById('pf-weight').value);
+  const errEl     = document.getElementById('pf-error');
+  if (!ft || ft < 3 || !age || !weightLbs) {
+    errEl.textContent = 'Please fill in all fields. Height (feet) must be at least 3.';
     errEl.style.display = 'block';
     return;
   }
   errEl.style.display = 'none';
+  const profile = { sex: _profileSex, heightFt: ft, heightIn, age, weightLbs };
+  saveBioProfile(profile);
+  showTargetsConfirm(profile, _pendingMode ?? state.mode);
+}
 
-  // Mifflin-St Jeor BMR
-  const weightKg  = weightLbs / 2.205;
-  const heightCm  = (ft * 12 + inches) * 2.54;
-  const bmr = _decideSex === 'female'
-    ? 10 * weightKg + 6.25 * heightCm - 5 * age - 161
-    : 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
-  const tdee = bmr * 1.45; // lightly-to-moderately active
-
-  let targetCals, targetProt;
-  if (goal === 'lose') {
-    // ~600 kcal deficit → ~1.2 lbs/week loss; high protein preserves muscle
-    targetCals = Math.max(1200, Math.round((tdee - 600) / 100) * 100);
-    targetProt = Math.round(weightLbs / 10) * 10;        // 1 g/lb
-  } else if (goal === 'muscle') {
-    // ~300 kcal surplus for lean bulk; 1 g/lb protein for MPS
-    targetCals = Math.round((tdee + 300) / 100) * 100;
-    targetProt = Math.round(weightLbs / 10) * 10;        // 1 g/lb
-  } else {
-    // Recomp: near-maintenance slight deficit; very high protein drives simultaneous changes
-    targetCals = Math.round((tdee - 150) / 100) * 100;
-    targetProt = Math.round(weightLbs * 1.1 / 10) * 10; // 1.1 g/lb
-  }
-
-  // Clamp to stepper ranges
-  targetCals = Math.min(5000, Math.max(500,  targetCals));
-  targetProt = Math.min(500,  Math.max(20,   targetProt));
-
-  setGoalDisplay('cals', targetCals);
-  setGoalDisplay('prot', targetProt);
+async function confirmModeSwitch() {
+  const cals = parseInt(document.getElementById('modal-cals').value);
+  const prot = parseInt(document.getElementById('modal-prot').value);
+  // Push values to config page steppers
+  setGoalDisplay('cals', cals);
+  setGoalDisplay('prot', prot);
   updateDensityHint();
-  closeDecideModal();
+  // If this was a mode switch, setModeUI was already called in toggleMode;
+  // state.mode is already the new mode. If standalone, mode unchanged.
+  const fd = new FormData();
+  fd.append('calories', cals);
+  fd.append('protein',  prot);
+  fd.append('mode',     state.mode);
+  try { await fetch('/api/goals', { method: 'POST', body: fd }); }
+  catch(e) { console.error('Failed to save goals:', e); }
+  closeProfileModal();
+}
+
+function cancelModeSwitch() {
+  // If we were mid-switch, revert the visual toggle and state
+  if (_pendingMode) {
+    const prevMode = _pendingMode === 'bulk' ? 'cut' : 'bulk';
+    setModeUI(prevMode);
+  }
+  closeProfileModal();
+}
+
+function closeProfileModal() {
+  document.getElementById('profile-modal').classList.add('hidden');
+  _pendingMode = null;
 }
 
 // ── Stepper ────────────────────────────────────────────────────────────────
