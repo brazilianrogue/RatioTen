@@ -50,7 +50,7 @@ body[data-mode="bulk"] {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
   height: calc(var(--nav-h) + env(safe-area-inset-top, 0px));
   padding-top: env(safe-area-inset-top, 0px);
-  background: rgba(14,17,23,0.9);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
@@ -74,7 +74,7 @@ body[data-mode="bulk"] {
   cursor: pointer; transition: all 0.2s; min-width: 60px;
 }
 .tab-btn svg { width: 18px; height: 18px; stroke: currentColor; }
-.tab-btn.active { background: rgba(252,163,17,0.12); color: var(--accent); }
+.tab-btn.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 
 /* ── Scrollable main ──────────────────────────────────────────────────── */
 #content {
