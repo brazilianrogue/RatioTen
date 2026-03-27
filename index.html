@@ -36,6 +36,15 @@
 }
 html, body { min-height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
 
+/* ── Bulk mode theme override ─────────────────────────────────────────────── */
+body[data-mode="bulk"] {
+  --accent:  #00e08a;
+  --bg:      #0d1210;
+  --surface: #141a16;
+  --card:    #1b2320;
+  --card2:   #20271f;
+}
+
 /* ── Fixed nav ────────────────────────────────────────────────────────── */
 #nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -911,7 +920,7 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
         </div>
       </div>
       <div id="pf-error" style="font-size:0.8rem;color:var(--red);margin-bottom:8px;display:none"></div>
-      <button class="save-btn" onclick="saveProfileFromModal()">Save Profile</button>
+      <button type="button" class="save-btn" onclick="saveProfileFromModal()">Save Profile</button>
     </div>
 
     <!-- Action buttons — shown once targets are displayed -->
@@ -1677,6 +1686,7 @@ const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sun
 // ── Mode toggle ──────────────────────────────────────────────────────────
 function setModeUI(mode) {
   state.mode = mode;
+  document.body.dataset.mode = mode;
   const track = document.getElementById('mode-toggle');
   const desc  = document.getElementById('mode-desc');
   const calLabel = document.querySelector('#view-plan .form-label');
@@ -1828,7 +1838,13 @@ function saveProfileFromModal() {
   errEl.style.display = 'none';
   const profile = { sex: _profileSex, heightFt: ft, heightIn, age, weightLbs };
   saveBioProfile(profile);
-  showTargetsConfirm(profile, _pendingMode ?? state.mode);
+  try {
+    showTargetsConfirm(profile, _pendingMode ?? state.mode);
+  } catch(e) {
+    errEl.textContent = 'Something went wrong: ' + e.message;
+    errEl.style.display = 'block';
+    console.error('showTargetsConfirm failed:', e);
+  }
 }
 
 async function confirmModeSwitch() {
