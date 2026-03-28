@@ -139,6 +139,8 @@ def calculate_plan_effectiveness(
 
             daily_data: dict = {}
             current_mode_days: set = set()  # days with ≥1 log stamped with the current mode
+            _rows_total = len(values) - 1        # DEBUG: total food log rows
+            _rows_in_window: list = []           # DEBUG: rows that passed the date filter
 
             for row in values[1:]:
                 try:
@@ -148,6 +150,7 @@ def calculate_plan_effectiveness(
                     log_date = dt.date()
                     if log_date < thirteen_days_ago or log_date > calc_date:
                         continue
+                    _rows_in_window.append(str(log_date))
                     cals = float(row[cal_idx]) if row[cal_idx] else 0.0
                     prot = float(row[prot_idx]) if row[prot_idx] else 0.0
 
@@ -310,6 +313,18 @@ def calculate_plan_effectiveness(
                 1 for d in daily_data.values() if not d.get("is_missing", False)
             )
             drivers["logging_pct"] = (days_with_data / total_days_eval * 100) if total_days_eval > 0 else 0.0
+
+            # DEBUG fields — temporary, safe to remove once scoring issue is resolved
+            drivers["_debug"] = {
+                "calc_date": str(calc_date),
+                "window_start": str(thirteen_days_ago),
+                "total_food_rows": _rows_total,
+                "rows_in_window": len(_rows_in_window),
+                "unique_dates_in_window": sorted(set(_rows_in_window)),
+                "days_with_data": days_with_data,
+                "mode": mode,
+                "is_bulk": is_bulk,
+            }
 
             # Bulk mode: check for enough bulk-stamped days BEFORE the general data
             # check, so cut-mode history in the window doesn't trigger "Need 7+ days".
