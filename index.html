@@ -1487,7 +1487,26 @@ function renderEffectiveness(eff) {
     scoreText.textContent = '—';
     scoreText.setAttribute('fill', 'rgba(0,166,255,0.35)');
     scoreText.removeAttribute('filter');
-    grid.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);font-size:0.85rem">${esc(eff.error || 'Not enough data yet (need 7+ days).')}</div>`;
+
+    if (eff.error && eff.error.startsWith('CALIBRATING:')) {
+      const parts       = eff.error.split(':');
+      const daysLogged  = parseInt(parts[1]) || 0;
+      const daysNeeded  = parseInt(parts[2]) || 7;
+      const pct         = Math.round((daysLogged / daysNeeded) * 100);
+      grid.innerHTML = `
+        <div style="grid-column:1/-1;text-align:center;padding:16px 0">
+          <div style="font-size:0.9rem;font-weight:600;color:var(--accent);letter-spacing:0.05em;margin-bottom:6px">CALIBRATING</div>
+          <div style="font-size:0.8rem;color:var(--muted);line-height:1.6;margin-bottom:14px">
+            Score goes live once ${daysNeeded} days of bulk data are in.<br>
+            <strong style="color:var(--text)">${daysLogged} of ${daysNeeded} days</strong> logged under Bulk.
+          </div>
+          <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;max-width:160px;margin:0 auto">
+            <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:2px;transition:width 0.4s"></div>
+          </div>
+        </div>`;
+    } else {
+      grid.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);font-size:0.85rem">${esc(eff.error || 'Not enough data yet (need 7+ days).')}</div>`;
+    }
     tip.style.display = 'none';
     return;
   }
