@@ -133,8 +133,11 @@ def calculate_plan_effectiveness(
             date_idx = col_map.get("Date", 0)
             cal_idx = col_map.get("Calories", 2)
             prot_idx = col_map.get("Protein", 3)
+            mode_idx = col_map.get("Mode", None)
 
             daily_data: dict = {}
+            current_mode_days: set = set()  # days with ≥1 log stamped with the current mode
+
             for row in values[1:]:
                 try:
                     if len(row) <= max(date_idx, cal_idx, prot_idx):
@@ -145,6 +148,15 @@ def calculate_plan_effectiveness(
                         continue
                     cals = float(row[cal_idx]) if row[cal_idx] else 0.0
                     prot = float(row[prot_idx]) if row[prot_idx] else 0.0
+
+                    # Determine mode for this row; legacy rows without a stamp default to cut
+                    if mode_idx is not None and len(row) > mode_idx and row[mode_idx].strip():
+                        row_mode = row[mode_idx].strip().lower()
+                    else:
+                        row_mode = MODE_CUT
+                    if row_mode == mode:
+                        current_mode_days.add(log_date)
+
                     if log_date not in daily_data:
                         daily_data[log_date] = {"cals": 0.0, "prot": 0.0, "logs": []}
                     daily_data[log_date]["cals"] += cals
@@ -297,6 +309,15 @@ def calculate_plan_effectiveness(
                 return (
                     None,
                     f"Need {MIN_DAYS_FOR_SCORE}+ days of data. Have {days_with_data}.",
+                    drivers,
+                )
+
+            # Bulk mode: require enough days logged *under bulk mode* before scoring.
+            # Grading cut data against bulk criteria produces a misleading low score.
+            if is_bulk and len(current_mode_days) < MIN_DAYS_FOR_SCORE:
+                return (
+                    None,
+                    f"CALIBRATING:{len(current_mode_days)}:{MIN_DAYS_FOR_SCORE}",
                     drivers,
                 )
 
