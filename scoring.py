@@ -305,19 +305,19 @@ def calculate_plan_effectiveness(
             )
             drivers["logging_pct"] = (days_with_data / total_days_eval * 100) if total_days_eval > 0 else 0.0
 
-            if days_with_data < MIN_DAYS_FOR_SCORE:
-                return (
-                    None,
-                    f"Need {MIN_DAYS_FOR_SCORE}+ days of data. Have {days_with_data}.",
-                    drivers,
-                )
-
-            # Bulk mode: require enough days logged *under bulk mode* before scoring.
-            # Grading cut data against bulk criteria produces a misleading low score.
+            # Bulk mode: check for enough bulk-stamped days BEFORE the general data
+            # check, so cut-mode history in the window doesn't trigger "Need 7+ days".
             if is_bulk and len(current_mode_days) < MIN_DAYS_FOR_SCORE:
                 return (
                     None,
                     f"CALIBRATING:{len(current_mode_days)}:{MIN_DAYS_FOR_SCORE}",
+                    drivers,
+                )
+
+            if days_with_data < MIN_DAYS_FOR_SCORE:
+                return (
+                    None,
+                    f"Need {MIN_DAYS_FOR_SCORE}+ days of data. Have {days_with_data}.",
                     drivers,
                 )
 
