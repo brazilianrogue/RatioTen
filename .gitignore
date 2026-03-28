@@ -1,13 +1,30 @@
-.venv/
+# Local environment — contains secrets, never commit
+.env
+*.env
+
+# Python
 __pycache__/
-.streamlit/secrets.toml
-*.json
-!static/manifest.json
-.DS_Store
-
-# Claude Code working files
-.claude/
-
-# Compiled binaries and local PIL installs
-PIL/
+*.py[cod]
 *.pyd
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# GCP credential files (belt-and-suspenders)
+*service_account*.json
+*credentials*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude worktrees (managed by Claude Code, not source)
+.claude/worktrees/
