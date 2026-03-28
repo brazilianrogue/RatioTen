@@ -59,6 +59,15 @@ BULK_CAL_FULL_POINTS = 4.0         # Points for hitting the calorie surplus rang
 BULK_CAL_PARTIAL_POINTS = 2.0      # Points for being close to the surplus range
 
 # ---------------------------------------------------------------------------
+# Scoring: Timing/Fasting Component — BULK MODE
+# IF is a secondary tool during bulk; eating-window drift is penalised lightly.
+# ---------------------------------------------------------------------------
+BULK_TIMING_BUFFER_HOURS = 2        # Wider grace-period (hrs) around window edges (vs 1 in cut)
+BULK_TIMING_PARTIAL_POINTS = 1.0    # Points awarded when outside even the wider buffer
+                                    # (timing is never a full zero in bulk — structure is
+                                    #  a convenience, not a fat-loss lever here)
+
+# ---------------------------------------------------------------------------
 # Scoring: Dynamic Protein Floor
 # ---------------------------------------------------------------------------
 PROTEIN_FLOOR_FULL_HOURS = 6.0      # Eating-window hours at which the full floor applies

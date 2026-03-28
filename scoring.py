@@ -58,6 +58,8 @@ from constants import (
     SCORE_WINDOW_DAYS,
     TIMING_BUFFER_HOURS,
     TIMING_FULL_POINTS,
+    BULK_TIMING_BUFFER_HOURS,
+    BULK_TIMING_PARTIAL_POINTS,
     WEIGHT_GAIN_PENALTY,
     WEIGHT_GAIN_PENALTY_THRESHOLD,
     WEIGHT_LOSS_FULL_THRESHOLD,
@@ -252,7 +254,11 @@ def calculate_plan_effectiveness(
                     prot_pts = 0.0
 
                 # Fasting timing points (2 pts)
-                timing_pts = 0.0
+                # Bulk mode: IF is secondary — use a wider buffer and award partial
+                # credit (1 pt) even when outside the window rather than zero.
+                buf_hours = BULK_TIMING_BUFFER_HOURS if is_bulk else TIMING_BUFFER_HOURS
+                timing_pts = BULK_TIMING_PARTIAL_POINTS if is_bulk else 0.0
+
                 if eating_hours == 0.0:
                     if nums["cals"] == 0:
                         timing_pts = TIMING_FULL_POINTS
@@ -262,11 +268,11 @@ def calculate_plan_effectiveness(
                         e_time = datetime.strptime(sched["end"], "%H:%M").time()
                         buf_start = (
                             datetime.combine(eval_date, s_time)
-                            - timedelta(hours=TIMING_BUFFER_HOURS)
+                            - timedelta(hours=buf_hours)
                         )
                         buf_end = (
                             datetime.combine(eval_date, e_time)
-                            + timedelta(hours=TIMING_BUFFER_HOURS)
+                            + timedelta(hours=buf_hours)
                         )
                         if buf_end < buf_start:
                             buf_end += timedelta(days=1)
