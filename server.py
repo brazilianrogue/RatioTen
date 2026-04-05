@@ -485,7 +485,8 @@ def _log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: s
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
         y, w, _ = now.isocalendar()
         week_num = f"{y}-W{w:02d}"
-        ws.append_row([ts, item, calories, protein, density, week_num, emoji])
+        mode = _read_user_goals().get("mode", DEFAULT_MODE)
+        ws.append_row([ts, item, calories, protein, density, week_num, emoji, mode])
         _invalidate("today_logs")
         _invalidate("trailing_7")
         return True
