@@ -1131,7 +1131,7 @@ async function loadDashboard() {
     const densVal   = document.getElementById('m-dens');
     const densDelta = document.getElementById('m-dens-delta');
     if (dashMode === 'bulk' && dash.fasting_status === 'Eating Window Active' && tl.window && tl.window.start && tl.window.end) {
-      densLabel.textContent = 'Fueling Cadence';
+      densLabel.textContent = 'Cadence';
       const [sh2, sm2] = tl.window.start.split(':').map(Number);
       const [eh2, em2] = tl.window.end.split(':').map(Number);
       const windowHours  = ((eh2*60+em2) - (sh2*60+sm2)) / 60;
