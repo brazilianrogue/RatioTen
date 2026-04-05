@@ -129,6 +129,7 @@ body[data-mode="bulk"] {
 .delta-green { background: rgba(0,166,255,0.15); color: var(--blue); }
 .delta-red   { background: rgba(220,53,69,0.15);  color: var(--red); }
 .delta-ok    { background: rgba(0,201,122,0.15);  color: var(--green); }
+.delta-amber { background: rgba(255,183,0,0.15);  color: #FFB700; }
 
 /* ── Status banner ────────────────────────────────────────────────────── */
 #status-banner {
@@ -619,8 +620,9 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
         <div class="card-delta" id="m-prot-delta"></div>
       </div>
       <div class="card">
-        <div class="card-label">Density</div>
+        <div class="card-label" id="m-dens-label">Density</div>
         <div class="card-value" id="m-dens">—</div>
+        <div class="card-delta" id="m-dens-delta"></div>
       </div>
     </div>
 
@@ -1123,7 +1125,41 @@ async function loadDashboard() {
 
     document.getElementById('m-cals').textContent = fmt(cals);
     document.getElementById('m-prot').textContent = prot + 'g';
-    document.getElementById('m-dens').textContent = dash.density;
+
+    // Density card — swap to Fueling Cadence in bulk during active eating window
+    const densLabel = document.getElementById('m-dens-label');
+    const densVal   = document.getElementById('m-dens');
+    const densDelta = document.getElementById('m-dens-delta');
+    if (dashMode === 'bulk' && dash.fasting_status === 'Eating Window Active' && tl.window && tl.window.start && tl.window.end) {
+      densLabel.textContent = 'Fueling Cadence';
+      const [sh2, sm2] = tl.window.start.split(':').map(Number);
+      const [eh2, em2] = tl.window.end.split(':').map(Number);
+      const windowHours  = ((eh2*60+em2) - (sh2*60+sm2)) / 60;
+      const now2         = new Date();
+      const nowMs2       = (now2.getHours()*60+now2.getMinutes())*60000 + now2.getSeconds()*1000;
+      const startMs2     = (sh2*60+sm2)*60000;
+      const hoursElapsed = Math.max(0, (nowMs2 - startMs2) / 3_600_000);
+      const targetRate   = windowHours > 0 ? goals.protein / windowHours : 0;
+      const actualGph    = hoursElapsed > 0 ? prot / hoursElapsed : 0;
+      const expectedProt = targetRate * hoursElapsed;
+      const hoursLate    = targetRate > 0 ? (expectedProt - prot) / targetRate : 0;
+      densVal.textContent = actualGph.toFixed(1) + 'g/h';
+      if (hoursLate > 1) {
+        densDelta.textContent = 'Critical';
+        densDelta.className   = 'card-delta delta-red';
+      } else if (hoursLate > 0) {
+        densDelta.textContent = 'Behind';
+        densDelta.className   = 'card-delta delta-amber';
+      } else {
+        densDelta.textContent = 'Optimal';
+        densDelta.className   = 'card-delta delta-ok';
+      }
+    } else {
+      densLabel.textContent = 'Density';
+      densVal.textContent   = dash.density;
+      densDelta.textContent = '';
+      densDelta.className   = 'card-delta';
+    }
 
     const calsLeft = goals.calories - cals;
     const calsEl   = document.getElementById('m-cals-delta');
