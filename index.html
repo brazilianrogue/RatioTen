@@ -152,6 +152,9 @@ body[data-mode="bulk"] {
   border-radius: 6px; margin: 54px 0;
 }
 .timeline-progress { position: absolute; top:0; left:0; height:100%; background: linear-gradient(90deg, rgba(0,166,255,0.3), rgba(0,255,204,0.3)); border-radius:9px; }
+@keyframes tl-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.tl-prot-warn   { background: linear-gradient(90deg, rgba(255,183,0,0.5), rgba(255,183,0,0.25)) !important; }
+.tl-prot-behind { background: linear-gradient(90deg, rgba(255,80,80,0.5), rgba(255,80,80,0.25)) !important; animation: tl-pulse 2s ease-in-out infinite; }
 .timeline-marker { position:absolute; top:50%; transform:translate(-50%,-50%); width:8px; height:18px; background:var(--blue); border-radius:2px; box-shadow:0 0 8px rgba(0,166,255,0.5); border:1px solid #fff; }
 .tl-emoji {
   position:absolute; font-size:1rem; white-space:nowrap;
@@ -1245,7 +1248,22 @@ function renderTimeline(logs, window, dash) {
       const endMs   = (eh*60+em)*60000;
       const nowMs   = (now.getHours()*60+now.getMinutes())*60000 + now.getSeconds()*1000;
       const pct     = Math.max(0, Math.min(100, (nowMs - startMs) / (endMs - startMs) * 100));
-      progress = `<div class="timeline-progress" style="width:${pct.toFixed(1)}%"></div>`
+
+      // Protein pace coloring — bulk mode only
+      let progressCls = '';
+      if ((dash.mode || 'cut') === 'bulk' && dash.goals && dash.goals.protein) {
+        const windowHours  = ((eh*60+em) - (sh*60+sm)) / 60;
+        if (windowHours > 0) {
+          const targetRate   = dash.goals.protein / windowHours;
+          const hoursElapsed = Math.max(0, (nowMs - startMs) / 3_600_000);
+          const expectedProt = targetRate * hoursElapsed;
+          const hoursLate    = targetRate > 0 ? (expectedProt - (dash.protein || 0)) / targetRate : 0;
+          if      (hoursLate > 1) progressCls = ' tl-prot-behind';
+          else if (hoursLate > 0) progressCls = ' tl-prot-warn';
+        }
+      }
+
+      progress = `<div class="timeline-progress${progressCls}" style="width:${pct.toFixed(1)}%"></div>`
                + `<div class="timeline-marker" style="left:${pct.toFixed(1)}%"></div>`;
     } catch(e) {}
   }
