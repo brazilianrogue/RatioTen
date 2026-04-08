@@ -112,7 +112,9 @@ SYSTEM_PROMPT_TTL = 300             # Seconds to cache the system prompt (5 minu
 # ---------------------------------------------------------------------------
 # Protein Density Target
 # ---------------------------------------------------------------------------
-TARGET_DENSITY = 10.0               # Minimum protein density % goal
+TARGET_DENSITY      = 10.0          # Minimum protein density % goal (cut)
+TARGET_DENSITY_BULK =  8.0          # Minimum protein density % goal (bulk — higher
+                                    # calorie denominator makes 10 % unachievable)
 
 # ---------------------------------------------------------------------------
 # Google Sheets
