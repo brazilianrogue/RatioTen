@@ -342,27 +342,6 @@ def calculate_plan_effectiveness(
                     drivers,
                 )
 
-            # DEBUG fields — temporary, safe to remove once scoring issue is resolved
-            drivers["_debug"] = {
-                "calc_date": str(calc_date),
-                "window_start": str(thirteen_days_ago),
-                "total_food_rows": _rows_total,
-                "rows_in_window": len(_rows_in_window),
-                "unique_dates_in_window": sorted(set(_rows_in_window)),
-                "days_with_data": days_with_data,
-                "mode": mode,
-                "is_bulk": is_bulk,
-            }
-
-            # Bulk mode: check for enough bulk-stamped days BEFORE the general data
-            # check, so cut-mode history in the window doesn't trigger "Need 7+ days".
-            if is_bulk and len(current_mode_days) < MIN_DAYS_FOR_SCORE:
-                return (
-                    None,
-                    f"CALIBRATING:{len(current_mode_days)}:{MIN_DAYS_FOR_SCORE}",
-                    drivers,
-                )
-
             if days_with_data < MIN_DAYS_FOR_SCORE:
                 return (
                     None,
