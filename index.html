@@ -689,6 +689,7 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
 
     <button class="eff-calc-link" onclick="openEffModal()">How is this calculated?</button>
     <div class="driver-grid" id="driver-grid"></div>
+    <div id="mode-window-indicator" style="display:none"></div>
 
     <!-- Weight Record + Sparkline Card (Stats page) -->
     <div id="weight-card-stats" style="display:none; margin:12px 0 4px; background:var(--card); border-radius:var(--radius); border:1px solid var(--border); padding:14px 16px 12px; overflow:hidden;">
@@ -1618,6 +1619,32 @@ function renderEffectiveness(eff) {
       <div class="driver-value">${dr.value}</div>
       <span class="driver-status ${dr.cls}">${dr.label_s}</span>
     </div>`).join('');
+
+  // Mode window indicator (bulk only, while window is filling)
+  const modeIndicator = document.getElementById('mode-window-indicator');
+  if (modeIndicator) {
+    const mDays = d.mode_days_in_window;
+    const mTarget = d.mode_window_target || 14;
+    if (typeof mDays === 'number' && mDays < mTarget) {
+      const pct = Math.round((mDays / mTarget) * 100);
+      modeIndicator.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,183,0,0.07);border:1px solid rgba(255,183,0,0.2);border-radius:8px;margin-top:10px">
+          <div style="flex:1">
+            <div style="font-size:0.75rem;color:var(--accent);font-weight:600;letter-spacing:0.04em;margin-bottom:3px">BULK WINDOW FILLING</div>
+            <div style="font-size:0.78rem;color:var(--muted);line-height:1.5"><strong style="color:var(--text)">${mDays} of ${mTarget} bulk days</strong> in scoring window — score stabilises as window fills.</div>
+          </div>
+          <div style="text-align:right;min-width:36px">
+            <div style="font-size:0.95rem;font-weight:700;color:var(--accent)">${mDays}/${mTarget}</div>
+          </div>
+        </div>
+        <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:6px">
+          <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:2px;transition:width 0.4s"></div>
+        </div>`;
+      modeIndicator.style.display = 'block';
+    } else {
+      modeIndicator.style.display = 'none';
+    }
+  }
 
   // Coach tip
   const tipText = coachTip(d);
