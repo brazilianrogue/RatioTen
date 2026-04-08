@@ -1665,13 +1665,30 @@ function closeDriverSheet() {
 }
 
 function coachTip(d) {
-  const logPct = d.logging_pct || 0;
-  const adRate = d.total_days > 0 ? (d.adherent_days / d.total_days) * 100 : 0;
-  if (logPct < 70)    return 'Data is thin. Log 5+ more days for a meaningful score.';
-  if (adRate < 75)    return 'Drifting from the calorie lid. Try pre-logging meals the night before.';
-  if ((d.avg_density||0) < 10) return 'Protein density is low. Swap refined carbs for a lean protein source.';
-  if ((d.weight_shift||0) < 0.2) return 'Scale is steady. Try lowering your calorie lid by 100 for the next 7 days.';
-  return null;
+  const logPct  = d.logging_pct || 0;
+  const adRate  = d.total_days > 0 ? (d.adherent_days / d.total_days) * 100 : 0;
+  const density = d.avg_density || 0;
+  const shift   = d.weight_shift || 0; // positive = weight lost, negative = weight gained
+  const bulk    = state.mode === 'bulk';
+
+  if (bulk) {
+    if (logPct < 70)               return 'Score needs more data — bulk mode requires 7 days of logged entries to calibrate properly. Log each meal as you eat it for the most accurate read.';
+    if (shift > 0.5)               return 'You\'re losing weight in bulk mode — the surplus isn\'t landing. Hit your calorie floor consistently this week.';
+    if (adRate < 75)               return 'Missing protocol targets in bulk stalls growth. The surplus has to be reliable, not occasional.';
+    if (shift < -1.5)              return 'Gaining faster than 1.5 lbs/week — excess fat accumulation is likely. Consider trimming 150–200 kcal from the surplus.';
+    if (density < 10)              return 'Protein density is low even in a surplus. Muscle synthesis needs amino acids available — add a high-protein anchor to your two biggest meals.';
+    if (shift > 0 && shift <= 0.5) return 'Weight is barely moving. Confirm you\'re consistently hitting the calorie floor — growth stalls without a reliable surplus.';
+    return 'Clean bulk. Weight moving at the right pace, protein is solid. This is how lean mass gets built.';
+  }
+
+  if (logPct < 70)               return 'Score needs more data — log at least 5 more days this week for a reliable read. Logging as you eat keeps the data honest.';
+  if (shift < -0.5)              return 'The scale is moving the wrong way. Audit your largest meals — one high-cal outlier can erase a week of discipline.';
+  if (adRate < 75 && shift > 1.5) return 'You\'re losing weight but missing protocol targets — your lid may be set too aggressively. Consider raising it by 100 kcal.';
+  if (adRate < 75)               return 'Protocol adherence is drifting. Logging each meal as you go keeps you honest and makes the gaps visible before they compound.';
+  if (density < 9.5)             return 'Protein density is pulling the score down. One carb-heavy meal swapped for a lean source moves this needle quickly.';
+  if (shift > 1.5)               return 'Dropping faster than 1.5 lbs/week risks muscle loss. Eat closer to your lid.';
+  if (shift < 0.2)               return 'The scale hasn\'t moved in 14 days. Tighten the lid by 100 kcal and give it one full week.';
+  return 'Solid. Consistency at this level is exactly what separates long-term results from short-term noise.';
 }
 
 function renderTrailing(rows) {
