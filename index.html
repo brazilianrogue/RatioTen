@@ -1594,6 +1594,12 @@ function renderEffectiveness(eff) {
     return                { label_s: 'Improve',  cls: 's-poor' };
   }
   function weightStatus(shift) {
+    if (state.mode === 'bulk') {
+      // shift negative = gained weight (good); shift positive = lost weight (bad)
+      if (shift <= -0.25) return { label_s: 'On Track', cls: 's-optimal' };
+      if (shift <= 0)     return { label_s: 'Minimal',  cls: 's-moderate' };
+      return                     { label_s: 'Losing',   cls: 's-poor' };
+    }
     if (shift >= 0.8) return { label_s: 'Losing',  cls: 's-optimal' };
     if (shift >= 0)   return { label_s: 'Steady',  cls: 's-moderate' };
     return                   { label_s: 'Gaining', cls: 's-poor' };
@@ -1608,7 +1614,9 @@ function renderEffectiveness(eff) {
   const tipProtein  = state.mode === 'bulk'
     ? "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥8.5%)\n• Moderate (7.0–8.4%)\n• Improve (<7.0%)"
     : "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥10.5%)\n• Moderate (9.5–10.4%)\n• Improve (<9.5%)";
-  const tipWeight   = "14-day weight shift (Week 1 vs Week 2).\nStatuses:\n• Losing (≥0.8 lbs drop)\n• Steady (0-0.7 lbs drop)\n• Gaining (Weight increased)";
+  const tipWeight   = state.mode === 'bulk'
+    ? "Weight trend across the bulk window (first-half vs second-half minimum).\nStatuses:\n• On Track (≥0.25 lbs gained)\n• Minimal (<0.25 lbs gained)\n• Losing (weight dropped)"
+    : "14-day weight shift (Week 1 vs Week 2).\nStatuses:\n• Losing (≥0.8 lbs drop)\n• Steady (0-0.7 lbs drop)\n• Gaining (Weight increased)";
   const tipLogging  = "Percentage of days logged in the past 14 days.\nStatuses:\n• Consistent (≥80%)\n• Partial (60-79%)\n• Sparse (<60%)";
 
   const drivers = [
