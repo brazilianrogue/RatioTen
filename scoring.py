@@ -168,9 +168,22 @@ def calculate_plan_effectiveness(
                 except Exception:
                     continue
 
-            # Fill missing days so we always evaluate exactly SCORE_WINDOW_DAYS
+            # In bulk mode, scope evaluation to the active mode window so
+            # cut-mode days don't contaminate bulk scoring.
+            mode_start_date = (
+                min(current_mode_days)
+                if (is_bulk and current_mode_days)
+                else thirteen_days_ago
+            )
+            mode_midpoint = mode_start_date + timedelta(
+                days=max(1, (calc_date - mode_start_date).days // 2)
+            )
+
+            # Fill missing days within the active mode window only
             for i in range(SCORE_WINDOW_DAYS):
                 eval_date = calc_date - timedelta(days=i)
+                if eval_date < mode_start_date:
+                    continue  # outside mode window — don't fill
                 if eval_date not in daily_data:
                     day_name = eval_date.strftime("%A")
                     sched = fasting_schedule.get(day_name, {"start": None, "end": None})
@@ -182,13 +195,18 @@ def calculate_plan_effectiveness(
                         "is_missing": not is_fasting_day,
                     }
 
-            total_days_eval = SCORE_WINDOW_DAYS
+            total_days_eval = sum(1 for d in daily_data if d >= mode_start_date) or 1
             adherence_score_total = 0.0
             sum_cals = 0.0
             sum_prot = 0.0
             daily_breakdown: dict = {}
 
             for eval_date, nums in daily_data.items():
+                if eval_date < mode_start_date:
+                    continue  # before mode window
+                # Skip days that have food logs but belong to a different mode
+                if not nums.get("is_missing", False) and eval_date not in current_mode_days:
+                    continue
                 day_name = eval_date.strftime("%A")
                 sched = fasting_schedule.get(day_name, {"start": None, "end": None})
 
@@ -307,10 +325,11 @@ def calculate_plan_effectiveness(
                 "weight_shift": 0.0,
             }
 
-            days_with_data = sum(
-                1 for d in daily_data.values() if not d.get("is_missing", False)
-            )
+            # Only count mode-matched logged days toward data coverage
+            days_with_data = len(current_mode_days)
             drivers["logging_pct"] = (days_with_data / total_days_eval * 100) if total_days_eval > 0 else 0.0
+            drivers["mode_days_in_window"] = len(current_mode_days)
+            drivers["mode_window_target"] = SCORE_WINDOW_DAYS
 
             # Bulk mode: check for enough bulk-stamped days BEFORE the general data
             # check, so cut-mode history in the window doesn't trigger "Need 7+ days".
@@ -370,25 +389,33 @@ def calculate_plan_effectiveness(
                 df_weight[date_col], errors="coerce"
             ).dt.date
             df_weight["Weight"] = pd.to_numeric(df_weight[weight_col], errors="coerce")
+
+            # Bulk: scope weight window to mode start so cut-period readings
+            # don't contaminate the trend baseline.
+            weight_window_start = mode_start_date if is_bulk else thirteen_days_ago
+            weight_split        = mode_midpoint   if is_bulk else seven_days_ago
+
             df_recent = df_weight[
-                (df_weight["Date"] >= thirteen_days_ago)
+                (df_weight["Date"] >= weight_window_start)
                 & (df_weight["Date"] <= calc_date)
             ].dropna(subset=["Weight"])
 
             if len(df_recent) < MIN_WEIGH_INS_FOR_SCORE:
+                window_desc = f"{len(current_mode_days)}-day bulk" if is_bulk else "14-day"
                 return (
                     None,
-                    f"Need {MIN_WEIGH_INS_FOR_SCORE}+ weigh-ins in 14 days. Have {len(df_recent)}.",
+                    f"Need {MIN_WEIGH_INS_FOR_SCORE}+ weigh-ins in the {window_desc} window. Have {len(df_recent)}.",
                     drivers,
                 )
 
-            first_half = df_recent[df_recent["Date"] < seven_days_ago]
-            second_half = df_recent[df_recent["Date"] >= seven_days_ago]
+            first_half  = df_recent[df_recent["Date"] <  weight_split]
+            second_half = df_recent[df_recent["Date"] >= weight_split]
 
             if first_half.empty or second_half.empty:
+                window_desc = "bulk" if is_bulk else "14-day"
                 return (
                     None,
-                    "Need weigh-ins in both weeks of the 14-day window.",
+                    f"Need weigh-ins spread across both halves of the {window_desc} window.",
                     drivers,
                 )
 
