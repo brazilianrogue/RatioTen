@@ -136,7 +136,9 @@ def calculate_plan_effectiveness(
             date_idx = col_map.get("Date", 0)
             cal_idx = col_map.get("Calories", 2)
             prot_idx = col_map.get("Protein", 3)
-            mode_idx = col_map.get("Mode", None)
+            # Mode column: use header if present, otherwise fall back to col 7
+            # (mode was added as the 8th column before the header was updated)
+            mode_idx = col_map.get("Mode", 7)
 
             daily_data: dict = {}
             current_mode_days: set = set()  # days with ≥1 log stamped with the current mode
@@ -149,7 +151,6 @@ def calculate_plan_effectiveness(
                     log_date = dt.date()
                     if log_date < thirteen_days_ago or log_date > calc_date:
                         continue
-                    _rows_in_window.append(str(log_date))
                     cals = float(row[cal_idx]) if row[cal_idx] else 0.0
                     prot = float(row[prot_idx]) if row[prot_idx] else 0.0
 
