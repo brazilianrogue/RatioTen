@@ -579,17 +579,22 @@ def build_system_prompt(
 - **Remaining Protein Needed:** {max(0, goals['protein'] - today_stats['protein'])}g
 """
 
-    logs_context = ""
     if today_logs:
         rows = "\n".join(
             f"| {l['item']} ({l['emoji']}) | {l.get('calories', 0)} | {l.get('protein', 0)} | {l.get('density', '0.0%')} |"
             for l in today_logs
         )
         logs_context = f"""
-### TODAY'S EXPLICIT FOOD LOGS:
-| Item | Calories | Protein (g) | Density |
-|------|----------|-------------|---------|
+### TODAY'S EXPLICIT FOOD LOGS (authoritative source of truth):
+| Item | Cals | Protein | Density |
+|------|------|---------|---------|
 {rows}
+"""
+    else:
+        logs_context = """
+### TODAY'S EXPLICIT FOOD LOGS (authoritative source of truth):
+**Nothing logged today yet.** The day is fresh — the running item table is empty.
+DO NOT pull food items from previous days' conversation history into today's table. Any food references in chat history from prior dates are reference material only, not today's intake.
 """
 
     coaching_mode = ""
@@ -718,8 +723,9 @@ Formatting Constraints (Mobile Optimized):
 - NEVER include Date or Date-Range columns in visible output.
 - Do NOT include today's partial data in any trend table. Today's progress belongs in the inline totals line only.
 - NEVER construct, approximate, or recreate a rolling trend table from conversation history. The trend table is provided by the system — if there is no ROLLING 7-DAY TREND section in this prompt, the table does not exist and must not be displayed.
-- When logging food, display ONE table with columns: Item Name, Cals, Protein, Density.
-- **Source of Truth for Item Table:** The "TODAY'S EXPLICIT FOOD LOGS" section above is the authoritative record of everything logged today (pulled directly from the database). Always include ALL items from that injected list PLUS any new item(s) from the current message. NEVER reconstruct the item list from conversation history alone.
+- When logging food, display ONE table using exactly these short headers: `| Item | Cals | Protein | Density |`. Do NOT use "Calories" or "Protein (g)" — the short headers fit better on mobile.
+- When the message is conversational (no new food being logged — strategy questions, reflections, corrections that don't add an item, planning), DO NOT show the item table or running totals line. Reply conversationally only.
+- **Source of Truth for Item Table:** The "TODAY'S EXPLICIT FOOD LOGS" section above is the authoritative record of everything logged today. If that section says "Nothing logged today yet," then today is empty — DO NOT pull items from prior days' conversation history into today's table. When food IS being logged, include ALL items from that injected list PLUS any new item(s) from the current message.
 
 Response Format After the Item Table:
 - Goals: {"~" if is_bulk else "<="} {goals['calories']} cal{"" if is_bulk else ""} | >= {goals['protein']}g protein | >= 10.0% density.
