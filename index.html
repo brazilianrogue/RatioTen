@@ -1584,6 +1584,11 @@ function renderEffectiveness(eff) {
     return              { label_s: 'Needs Focus',  cls: 's-poor' };
   }
   function densityStatus(v) {
+    if (state.mode === 'bulk') {
+      if (v >= 8.5) return { label_s: 'Lean',     cls: 's-optimal' };
+      if (v >= 7.0) return { label_s: 'Moderate', cls: 's-moderate' };
+      return               { label_s: 'Improve',  cls: 's-poor' };
+    }
     if (v >= 10.5) return { label_s: 'Lean',     cls: 's-optimal' };
     if (v >= 9.5)  return { label_s: 'Moderate', cls: 's-moderate' };
     return                { label_s: 'Improve',  cls: 's-poor' };
@@ -1600,7 +1605,9 @@ function renderEffectiveness(eff) {
   }
 
   const tipProtocol = "Average daily adherence score (Calories, Dynamic Protein, Fasting Window).\nStatuses:\n• Optimal (≥85%)\n• Inconsistent (70-84%)\n• Needs Focus (<70%)";
-  const tipProtein  = "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥10.5%)\n• Moderate (9.5-10.4%)\n• Improve (<9.5%)";
+  const tipProtein  = state.mode === 'bulk'
+    ? "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥8.5%)\n• Moderate (7.0–8.4%)\n• Improve (<7.0%)"
+    : "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥10.5%)\n• Moderate (9.5–10.4%)\n• Improve (<9.5%)";
   const tipWeight   = "14-day weight shift (Week 1 vs Week 2).\nStatuses:\n• Losing (≥0.8 lbs drop)\n• Steady (0-0.7 lbs drop)\n• Gaining (Weight increased)";
   const tipLogging  = "Percentage of days logged in the past 14 days.\nStatuses:\n• Consistent (≥80%)\n• Partial (60-79%)\n• Sparse (<60%)";
 
@@ -1703,7 +1710,7 @@ function coachTip(d) {
     if (shift > 0.5)               return 'You\'re losing weight in bulk mode — the surplus isn\'t landing. Hit your calorie floor consistently this week.';
     if (adRate < 75)               return 'Missing protocol targets in bulk stalls growth. The surplus has to be reliable, not occasional.';
     if (shift < -1.5)              return 'Gaining faster than 1.5 lbs/week — excess fat accumulation is likely. Consider trimming 150–200 kcal from the surplus.';
-    if (density < 10)              return 'Protein density is low even in a surplus. Muscle synthesis needs amino acids available — add a high-protein anchor to your two biggest meals.';
+    if (density < 7.5)             return 'Protein density is low even in a surplus. Muscle synthesis needs amino acids available — add a high-protein anchor to your two biggest meals.';
     if (shift > 0 && shift <= 0.5) return 'Weight is barely moving. Confirm you\'re consistently hitting the calorie floor — growth stalls without a reliable surplus.';
     return 'Clean bulk. Weight moving at the right pace, protein is solid. This is how lean mass gets built.';
   }
