@@ -15,7 +15,7 @@ from typing import TypedDict
 
 import gspread
 
-from constants import SPREADSHEET_NAME
+from constants import SPREADSHEET_NAME, USER_CONFIGS, DEFAULT_USER
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +59,9 @@ class MealLogEntry(TypedDict):
 # Connection helper
 # ---------------------------------------------------------------------------
 
-def open_sheet() -> gspread.Spreadsheet:
-    """Open the shared RatioTen spreadsheet using service-account credentials."""
+def open_sheet(user_id: str = DEFAULT_USER) -> gspread.Spreadsheet:
+    """Open the RatioTen spreadsheet for the given user using service-account credentials."""
+    spreadsheet_name = USER_CONFIGS.get(user_id, USER_CONFIGS[DEFAULT_USER])["spreadsheet"]
     credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
     gc = gspread.service_account_from_dict(credentials_dict)
-    return gc.open(SPREADSHEET_NAME)
+    return gc.open(spreadsheet_name)

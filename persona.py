@@ -1,6 +1,6 @@
 # RatioTen — Coach Persona & Instructions
 
-BIO_DATA = """
+_BIO_DATA_ED = """
 ### User Context & InBody Baseline (Feb 2026):
 - **Starting Stats:** 225.7 lbs | 32.9% PBF | BMR 1,854.
 - **The Core (LBM):** 151.5 lbs. This is our foundation. Protect this muscle at all costs.
@@ -8,6 +8,20 @@ BIO_DATA = """
 - **Primary Health Metric:** Reduce Visceral Fat from Level 14 to <10.
 - **Goal Framework:** 150g Protein Floor (Muscle Insurance) and 1,500 Calorie Lid (Fat-Burning Engine).
 """
+
+_BIO_DATA_ALI = """
+### User Context:
+- **Name:** Ali
+- **Goal Framework:** Configured via User Goals settings.
+"""
+
+# Legacy alias — kept so any direct imports of persona.BIO_DATA still work.
+BIO_DATA = _BIO_DATA_ED
+
+
+def get_bio_data(user_id: str) -> str:
+    """Return the correct bio block for the given user."""
+    return _BIO_DATA_ALI if user_id == "ali" else _BIO_DATA_ED
 
 TONE_GUIDANCE = """
 ### Conversational Style:

@@ -119,7 +119,16 @@ TARGET_DENSITY_BULK =  8.0          # Minimum protein density % goal (bulk — h
 # ---------------------------------------------------------------------------
 # Google Sheets
 # ---------------------------------------------------------------------------
-SPREADSHEET_NAME = "Nutrition_Logs"
+SPREADSHEET_NAME = "Nutrition_Logs"  # kept for legacy imports
+
+# ---------------------------------------------------------------------------
+# Multi-user config
+# ---------------------------------------------------------------------------
+DEFAULT_USER = "ed"
+USER_CONFIGS: dict[str, dict] = {
+    "ed":  {"spreadsheet": "Nutrition_Logs"},
+    "ali": {"spreadsheet": "Nutrition_Logs_Ali"},
+}
 WS_CHAT_HISTORY = "Chat_History"
 WS_WEIGHT_LOGS = "Weight_Logs"
 WS_FASTING_SCHEDULE = "Fasting_Schedule"

@@ -853,6 +853,10 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
           <span class="lbl" id="build-number" style="font-family:monospace;color:var(--muted)">—</span>
         </div>
         <div class="adv-row">
+          <span class="lbl">Profile</span>
+          <button class="adv-btn" id="switch-profile-btn" onclick="switchUser()">Switch Profile</button>
+        </div>
+        <div class="adv-row">
           <span class="lbl">Clear Chat History</span>
           <button class="adv-btn danger" onclick="clearChat()">Clear</button>
         </div>
@@ -1081,12 +1085,41 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── User identity (auto-detect once, persist to localStorage) ─────────────
+const USER_ID_KEY = 'rt_user_id';
+const USER_IDS    = ['ed', 'ali'];
+
+function getUserId() {
+  let uid = localStorage.getItem(USER_ID_KEY);
+  if (!uid || !USER_IDS.includes(uid)) {
+    // Pro Max has a noticeably wider screen — 420px threshold is stable
+    uid = screen.width >= 420 ? 'ed' : 'ali';
+    localStorage.setItem(USER_ID_KEY, uid);
+  }
+  return uid;
+}
+
+function switchUser() {
+  const current = getUserId();
+  const next    = current === 'ed' ? 'ali' : 'ed';
+  localStorage.setItem(USER_ID_KEY, next);
+  location.reload();
+}
+
+function updateSwitchProfileLabel() {
+  const btn = document.getElementById('switch-profile-btn');
+  if (!btn) return;
+  const current = getUserId();
+  btn.textContent = current === 'ed' ? "Switch to Ali's Profile" : "Switch to Ed's Profile";
+}
+
 // ── Dashboard ──────────────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
+    const uid = getUserId();
     const [dash, tl] = await Promise.all([
-      fetch('/api/dashboard').then(r=>r.json()),
-      fetch('/api/logs/today').then(r=>r.json()),
+      fetch(`/api/dashboard?user_id=${uid}`).then(r=>r.json()),
+      fetch(`/api/logs/today?user_id=${uid}`).then(r=>r.json()),
     ]);
 
     // Status banner
@@ -1317,7 +1350,7 @@ function renderTimeline(logs, window, dash) {
 // ── Chat ───────────────────────────────────────────────────────────────────
 async function loadChatHistory() {
   try {
-    const data = await fetch('/api/chat/history').then(r=>r.json());
+    const data = await fetch(`/api/chat/history?user_id=${getUserId()}`).then(r=>r.json());
     const msgs = data.messages || [];
     const list = document.getElementById('chat-list');
     const empty = document.getElementById('chat-empty');
@@ -1395,6 +1428,7 @@ async function submitChat() {
   // Build FormData
   const fd = new FormData();
   fd.append('text', text);
+  fd.append('user_id', getUserId());
   if (state.pendingImage) {
     fd.append('image', state.pendingImage);
     clearImage();
@@ -1442,7 +1476,7 @@ async function submitChat() {
 async function loadAnalyze() {
   state.analyzeLoaded = true;
   try {
-    const data = await fetch('/api/analyze').then(r=>r.json());
+    const data = await fetch(`/api/analyze?user_id=${getUserId()}`).then(r=>r.json());
     renderEffectiveness(data.effectiveness);
     renderWeightCard();
     renderTrailing(data.trailing_7);
@@ -1992,6 +2026,7 @@ async function confirmModeSwitch() {
   fd.append('calories', cals);
   fd.append('protein',  prot);
   fd.append('mode',     state.mode);
+  fd.append('user_id',  getUserId());
   try { await fetch('/api/goals', { method: 'POST', body: fd }); }
   catch(e) { console.error('Failed to save goals:', e); }
   closeProfileModal();
@@ -2033,9 +2068,10 @@ function stepGoal(id, delta) {
 async function loadPlan() {
   state.planLoaded = true;
   try {
+    const uid = getUserId();
     const [goals, sched] = await Promise.all([
-      fetch('/api/goals').then(r=>r.json()),
-      fetch('/api/schedule').then(r=>r.json()),
+      fetch(`/api/goals?user_id=${uid}`).then(r=>r.json()),
+      fetch(`/api/schedule?user_id=${uid}`).then(r=>r.json()),
     ]);
     setGoalDisplay('cals', goals.calories || 2000);
     setGoalDisplay('prot', goals.protein  || 150);
@@ -2059,6 +2095,7 @@ async function saveGoals() {
   fd.append('calories', document.getElementById('goal-cals').value);
   fd.append('protein',  document.getElementById('goal-prot').value);
   fd.append('mode',     state.mode);
+  fd.append('user_id',  getUserId());
   try {
     await fetch('/api/goals', { method:'POST', body:fd });
     showMsg('goals-msg', '✅ Saved', 'var(--green)');
@@ -2227,7 +2264,7 @@ function updateSchedHour(day, field, h) {
 
 async function saveSchedule() {
   try {
-    await fetch('/api/schedule', {
+    await fetch(`/api/schedule?user_id=${getUserId()}`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(scheduleData),
@@ -2241,7 +2278,7 @@ async function saveSchedule() {
 
 async function clearChat() {
   if (!confirm('Clear all chat history?')) return;
-  await fetch('/api/chat/history', { method:'DELETE' });
+  await fetch(`/api/chat/history?user_id=${getUserId()}`, { method:'DELETE' });
   document.getElementById('chat-list').innerHTML = '';
   document.getElementById('chat-empty').style.display = 'block';
 }
@@ -2251,7 +2288,7 @@ async function syncLogs() {
   btn.textContent = 'Syncing…';
   btn.disabled = true;
   try {
-    await fetch('/api/effectiveness/sync', { method:'POST' });
+    await fetch(`/api/effectiveness/sync?user_id=${getUserId()}`, { method:'POST' });
     btn.textContent = '✅ Done';
   } catch(e) {
     btn.textContent = 'Error';
@@ -2457,6 +2494,9 @@ function showMsg(id, msg, color) {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 (async function init() {
+  // Resolve user identity before any data fetches
+  getUserId();
+  updateSwitchProfileLabel();
   // Show input bar for log view
   document.getElementById('input-bar').classList.add('visible');
   // Load dashboard data

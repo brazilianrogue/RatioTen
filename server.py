@@ -17,7 +17,7 @@ from typing import Optional
 
 import gspread
 import pandas as pd
-from fastapi import FastAPI, Form, HTTPException, UploadFile, File
+from fastapi import FastAPI, Form, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
@@ -25,14 +25,15 @@ from google import genai
 import persona
 from constants import (
     DEFAULT_MODE,
+    DEFAULT_USER,
     EASTERN,
     MODE_BULK,
     MODE_CUT,
     PRIMARY_MODEL,
     SECONDARY_MODEL,
     STABLE_MODEL,
+    USER_CONFIGS,
     WS_CHAT_HISTORY,
-    SPREADSHEET_NAME,
     WS_WEIGHT_LOGS,
     WS_FASTING_SCHEDULE,
     WS_USER_GOALS,
@@ -77,17 +78,19 @@ def _invalidate(key: str):
 # Shared clients (created once at startup)
 # ---------------------------------------------------------------------------
 _gc: gspread.Client | None = None
-_sh: gspread.Spreadsheet | None = None
+_sh_cache: dict[str, gspread.Spreadsheet] = {}  # user_id → Spreadsheet
 _gemini: genai.Client | None = None
 
 
-def _get_sh():
-    global _gc, _sh
-    if _sh is None:
-        creds = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
-        _gc = gspread.service_account_from_dict(creds)
-        _sh = _gc.open(SPREADSHEET_NAME)
-    return _sh
+def _get_sh(user_id: str = DEFAULT_USER) -> gspread.Spreadsheet:
+    global _gc, _sh_cache
+    if user_id not in _sh_cache:
+        if _gc is None:
+            creds = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
+            _gc = gspread.service_account_from_dict(creds)
+        spreadsheet_name = USER_CONFIGS.get(user_id, USER_CONFIGS[DEFAULT_USER])["spreadsheet"]
+        _sh_cache[user_id] = _gc.open(spreadsheet_name)
+    return _sh_cache[user_id]
 
 
 def _get_gemini():
@@ -113,9 +116,9 @@ DEFAULT_SCHEDULE = {
 DEFAULT_GOALS = {"calories": 1500, "protein": 150, "mode": DEFAULT_MODE}
 
 
-def _read_fasting_schedule() -> dict:
+def _read_fasting_schedule(user_id: str = DEFAULT_USER) -> dict:
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         try:
             ws = sh.worksheet(WS_FASTING_SCHEDULE)
         except gspread.WorksheetNotFound:
@@ -142,9 +145,9 @@ def _read_fasting_schedule() -> dict:
         return DEFAULT_SCHEDULE
 
 
-def _read_user_goals() -> dict:
+def _read_user_goals(user_id: str = DEFAULT_USER) -> dict:
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         try:
             ws = sh.worksheet(WS_USER_GOALS)
         except gspread.WorksheetNotFound:
@@ -174,9 +177,9 @@ def _read_user_goals() -> dict:
         return DEFAULT_GOALS.copy()
 
 
-def _read_custom_instructions() -> str:
+def _read_custom_instructions(user_id: str = DEFAULT_USER) -> str:
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         try:
             ws = sh.worksheet(WS_CUSTOM_INSTRUCTIONS)
         except gspread.WorksheetNotFound:
@@ -195,9 +198,9 @@ def _read_custom_instructions() -> str:
         return ""
 
 
-def _read_lowest_weight() -> Optional[float]:
+def _read_lowest_weight(user_id: str = DEFAULT_USER) -> Optional[float]:
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         try:
             ws = sh.worksheet(WS_WEIGHT_LOGS)
         except gspread.WorksheetNotFound:
@@ -231,10 +234,10 @@ def _parse_weight_date(val: str) -> Optional[str]:
     return None
 
 
-def _read_weight_history() -> list:
+def _read_weight_history(user_id: str = DEFAULT_USER) -> list:
     """Returns up to 30 daily weight entries (one per day, lowest reading), oldest first."""
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         try:
             ws = sh.worksheet(WS_WEIGHT_LOGS)
         except gspread.WorksheetNotFound:
@@ -281,9 +284,9 @@ def _read_weight_history() -> list:
         return []
 
 
-def _read_today_logs() -> list:
+def _read_today_logs(user_id: str = DEFAULT_USER) -> list:
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         ws = sh.sheet1
         values = ws.get_all_values()
         if len(values) <= 1:
@@ -313,10 +316,10 @@ def _read_today_logs() -> list:
         return []
 
 
-def _read_trailing_7_days() -> list[dict]:
+def _read_trailing_7_days(user_id: str = DEFAULT_USER) -> list[dict]:
     """Returns a list of {date, calories, protein, density} dicts, newest first."""
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         ws = sh.sheet1
         values = ws.get_all_values()
         if len(values) <= 1:
@@ -348,10 +351,10 @@ def _read_trailing_7_days() -> list[dict]:
         return []
 
 
-def _read_logs_history(days: int = 10) -> dict:
+def _read_logs_history(days: int = 10, user_id: str = DEFAULT_USER) -> dict:
     """Returns {date_str: [log_entry, ...]} for the past `days` days (excluding today)."""
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         ws = sh.sheet1
         values = ws.get_all_values()
         if len(values) <= 1:
@@ -388,10 +391,10 @@ def _read_logs_history(days: int = 10) -> dict:
         return {}
 
 
-def _read_wow() -> list[dict]:
+def _read_wow(user_id: str = DEFAULT_USER) -> list[dict]:
     """Week-over-week averages."""
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         ws = sh.sheet1
         values = ws.get_all_values()
         if len(values) <= 1:
@@ -430,9 +433,9 @@ def _read_wow() -> list[dict]:
         return []
 
 
-def _read_persistent_chat() -> list[dict]:
+def _read_persistent_chat(user_id: str = DEFAULT_USER) -> list[dict]:
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         try:
             ws = sh.worksheet(WS_CHAT_HISTORY)
         except gspread.WorksheetNotFound:
@@ -457,9 +460,9 @@ def _read_persistent_chat() -> list[dict]:
         return []
 
 
-def _log_chat_to_sheet(role: str, content):
+def _log_chat_to_sheet(role: str, content, user_id: str = DEFAULT_USER):
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         try:
             ws = sh.worksheet(WS_CHAT_HISTORY)
         except Exception:
@@ -472,23 +475,23 @@ def _log_chat_to_sheet(role: str, content):
                 parts.append({"text": str(item) if not isinstance(item, bytes) else "📷 *Photo attached*"})
         ts = datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M:%S")
         ws.append_row([ts, role, json.dumps(parts)])
-        _invalidate("chat_history")
+        _invalidate(f"chat_history_{user_id}")
     except Exception:
         pass
 
 
-def _log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: str = "🍽️") -> bool:
+def _log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: str = "🍽️", user_id: str = DEFAULT_USER) -> bool:
     try:
-        sh = _get_sh()
+        sh = _get_sh(user_id)
         ws = sh.sheet1
         now = datetime.now(EASTERN)
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
         y, w, _ = now.isocalendar()
         week_num = f"{y}-W{w:02d}"
-        mode = _read_user_goals().get("mode", DEFAULT_MODE)
+        mode = _read_user_goals(user_id).get("mode", DEFAULT_MODE)
         ws.append_row([ts, item, calories, protein, density, week_num, emoji, mode])
-        _invalidate("today_logs")
-        _invalidate("trailing_7")
+        _invalidate(f"today_logs_{user_id}")
+        _invalidate(f"trailing_7_{user_id}")
         return True
     except Exception as e:
         log.error("Failed to log meal: %s", e)
@@ -551,6 +554,7 @@ def build_system_prompt(
     weekly_summary: Optional[list] = None,
     user_message: str = "",
     mode: str = DEFAULT_MODE,
+    user_id: str = DEFAULT_USER,
 ) -> str:
     now = datetime.now(EASTERN)
     formatted_schedule = "\n".join([
@@ -689,7 +693,7 @@ DO NOT pull food items from previous days' conversation history into today's tab
 
 You are the RatioTen Assistant — a knowledgeable, friendly nutrition coach. You are accurate with numbers, genuinely interested in the user's progress, and conversational in tone. Match your energy to the moment: brief and punchy for routine logs, warm and reflective at day's end. Reserve big energy for big moments.
 
-{persona.BIO_DATA}
+{persona.get_bio_data(user_id)}
 {persona.TONE_GUIDANCE}
 {persona.VOCABULARY}
 {persona.BANTER_INSTRUCTIONS}
@@ -821,12 +825,13 @@ async def version():
 
 
 @app.get("/api/dashboard")
-async def dashboard():
-    schedule       = _cached("schedule",       600,  _read_fasting_schedule)
-    goals          = _cached("goals",          600,  _read_user_goals)
-    today_logs     = _cached("today_logs",      60,  _read_today_logs)
-    lowest_weight  = _cached("lowest_weight", 3600,  _read_lowest_weight,  empty_ttl=30)
-    weight_history = _cached("weight_history", 3600, _read_weight_history, empty_ttl=30)
+async def dashboard(user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    schedule       = _cached(f"schedule_{uid}",       600,  lambda: _read_fasting_schedule(uid))
+    goals          = _cached(f"goals_{uid}",          600,  lambda: _read_user_goals(uid))
+    today_logs     = _cached(f"today_logs_{uid}",      60,  lambda: _read_today_logs(uid))
+    lowest_weight  = _cached(f"lowest_weight_{uid}", 3600,  lambda: _read_lowest_weight(uid),  empty_ttl=30)
+    weight_history = _cached(f"weight_history_{uid}", 3600, lambda: _read_weight_history(uid), empty_ttl=30)
 
     # Today's totals
     cals    = sum(l["calories"] for l in today_logs)
@@ -849,9 +854,10 @@ async def dashboard():
 
 
 @app.get("/api/logs/today")
-async def logs_today():
-    today_logs = _cached("today_logs", 60, _read_today_logs)
-    schedule   = _cached("schedule",   600, _read_fasting_schedule)
+async def logs_today(user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    today_logs = _cached(f"today_logs_{uid}", 60,  lambda: _read_today_logs(uid))
+    schedule   = _cached(f"schedule_{uid}",   600, lambda: _read_fasting_schedule(uid))
     now        = datetime.now(EASTERN)
     day_sched  = schedule.get(now.strftime("%A"), {"start": None, "end": None})
 
@@ -883,19 +889,21 @@ async def logs_today():
 
 
 @app.get("/api/chat/history")
-async def chat_history():
-    msgs = _cached("chat_history", 600, _read_persistent_chat)
+async def chat_history(user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    msgs = _cached(f"chat_history_{uid}", 600, lambda: _read_persistent_chat(uid))
     return {"messages": msgs}
 
 
 @app.delete("/api/chat/history")
-async def clear_chat():
+async def clear_chat(user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
     try:
-        sh = _get_sh()
+        sh = _get_sh(uid)
         ws = sh.worksheet(WS_CHAT_HISTORY)
         ws.clear()
         ws.append_row(["Timestamp", "Role", "Parts"])
-        _invalidate("chat_history")
+        _invalidate(f"chat_history_{uid}")
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -903,15 +911,17 @@ async def clear_chat():
 
 @app.post("/api/chat")
 async def chat(
-    text:  str        = Form(...),
-    image: UploadFile = File(None),
+    text:    str        = Form(...),
+    image:   UploadFile = File(None),
+    user_id: str        = Form(DEFAULT_USER),
 ):
-    schedule     = _cached("schedule",     600, _read_fasting_schedule)
-    goals        = _cached("goals",        600, _read_user_goals)
-    today_logs   = _cached("today_logs",    60, _read_today_logs)
-    custom_instr = _cached("custom_instr", 600, _read_custom_instructions)
-    history      = _cached("chat_history", 600, _read_persistent_chat)
-    trailing     = _cached("trailing_7",   600, _read_trailing_7_days)
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    schedule     = _cached(f"schedule_{uid}",     600, lambda: _read_fasting_schedule(uid))
+    goals        = _cached(f"goals_{uid}",        600, lambda: _read_user_goals(uid))
+    today_logs   = _cached(f"today_logs_{uid}",    60, lambda: _read_today_logs(uid))
+    custom_instr = _cached(f"custom_instr_{uid}", 600, lambda: _read_custom_instructions(uid))
+    history      = _cached(f"chat_history_{uid}", 600, lambda: _read_persistent_chat(uid))
+    trailing     = _cached(f"trailing_7_{uid}",   600, lambda: _read_trailing_7_days(uid))
 
     cals    = sum(l["calories"] for l in today_logs)
     protein = sum(l["protein"]  for l in today_logs)
@@ -926,6 +936,7 @@ async def chat(
         weekly_summary=trailing,
         user_message=text,
         mode=active_mode,
+        user_id=uid,
     )
 
     # Read image bytes if provided
@@ -938,8 +949,8 @@ async def chat(
     if image_bytes:
         user_content.append("📷 *Photo attached*")
     user_content.append(text)
-    _log_chat_to_sheet("user", user_content)
-    _invalidate("chat_history")
+    _log_chat_to_sheet("user", user_content, uid)
+    _invalidate(f"chat_history_{uid}")
 
     async def generate():
         full_response = ""
@@ -984,8 +995,8 @@ async def chat(
         meal_log = _parse_meal_log(full_response)
 
         # Log assistant response to sheet
-        _log_chat_to_sheet("assistant", full_response)
-        _invalidate("chat_history")
+        _log_chat_to_sheet("assistant", full_response, uid)
+        _invalidate(f"chat_history_{uid}")
 
         # Write meal entries to sheet
         logged_items = []
@@ -997,6 +1008,7 @@ async def chat(
                     int(entry.get("protein", 0)),
                     str(entry.get("density", "0.0%")),
                     str(entry.get("emoji", "🍽️")),
+                    uid,
                 )
                 if ok:
                     logged_items.append(entry)
@@ -1011,22 +1023,24 @@ async def chat(
 
 
 @app.get("/api/goals")
-async def get_goals():
-    return _cached("goals", 600, _read_user_goals)
+async def get_goals(user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    return _cached(f"goals_{uid}", 600, lambda: _read_user_goals(uid))
 
 
 @app.post("/api/goals")
 async def save_goals(
     calories: int = Form(...),
-    protein: int = Form(...),
-    mode: str = Form(DEFAULT_MODE),
+    protein:  int = Form(...),
+    mode:     str = Form(DEFAULT_MODE),
+    user_id:  str = Form(DEFAULT_USER),
 ):
-    # Validate mode
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
     clean_mode = mode.strip().lower()
     if clean_mode not in (MODE_CUT, MODE_BULK):
         clean_mode = DEFAULT_MODE
     try:
-        sh = _get_sh()
+        sh = _get_sh(uid)
         try:
             ws = sh.worksheet(WS_USER_GOALS)
         except gspread.WorksheetNotFound:
@@ -1036,21 +1050,23 @@ async def save_goals(
         ws.append_row(["Calories", calories])
         ws.append_row(["Protein", protein])
         ws.append_row(["Mode", clean_mode])
-        _invalidate("goals")
+        _invalidate(f"goals_{uid}")
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/schedule")
-async def get_schedule():
-    return _cached("schedule", 600, _read_fasting_schedule)
+async def get_schedule(user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    return _cached(f"schedule_{uid}", 600, lambda: _read_fasting_schedule(uid))
 
 
 @app.post("/api/schedule")
-async def save_schedule(body: dict):
+async def save_schedule(body: dict, user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
     try:
-        sh = _get_sh()
+        sh = _get_sh(uid)
         try:
             ws = sh.worksheet(WS_FASTING_SCHEDULE)
         except gspread.WorksheetNotFound:
@@ -1061,23 +1077,24 @@ async def save_schedule(body: dict):
             start_val = times.get("start") or "Skip"
             end_val   = times.get("end")   or "Skip"
             ws.append_row([day, start_val, end_val])
-        _invalidate("schedule")
+        _invalidate(f"schedule_{uid}")
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/analyze")
-async def analyze():
-    schedule = _cached("schedule", 600, _read_fasting_schedule)
-    goals    = _cached("goals",    600, _read_user_goals)
-    trailing = _cached("trailing_7", 300, _read_trailing_7_days)
-    wow      = _cached("wow",        300, _read_wow)
-    history  = _cached("log_history", 300, lambda: _read_logs_history(10))
+async def analyze(user_id: str = Query(DEFAULT_USER)):
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    schedule = _cached(f"schedule_{uid}",    600, lambda: _read_fasting_schedule(uid))
+    goals    = _cached(f"goals_{uid}",       600, lambda: _read_user_goals(uid))
+    trailing = _cached(f"trailing_7_{uid}",  300, lambda: _read_trailing_7_days(uid))
+    wow      = _cached(f"wow_{uid}",         300, lambda: _read_wow(uid))
+    history  = _cached(f"log_history_{uid}", 300, lambda: _read_logs_history(10, uid))
 
     mode = goals.get("mode", DEFAULT_MODE)
     score, err, drivers = calculate_plan_effectiveness(
-        pre_sh=_get_sh(), pre_goals=goals, pre_fasting=schedule, mode=mode,
+        pre_sh=_get_sh(uid), pre_goals=goals, pre_fasting=schedule, mode=mode,
     )
 
     return {
@@ -1091,25 +1108,28 @@ async def analyze():
 
 
 @app.post("/api/effectiveness/sync")
-async def effectiveness_sync():
-    schedule = _cached("schedule", 600, _read_fasting_schedule)
-    goals    = _cached("goals",    600, _read_user_goals)
+async def effectiveness_sync(user_id: str = Query(DEFAULT_USER)):
+    uid      = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    schedule = _cached(f"schedule_{uid}", 600, lambda: _read_fasting_schedule(uid))
+    goals    = _cached(f"goals_{uid}",    600, lambda: _read_user_goals(uid))
     mode     = goals.get("mode", DEFAULT_MODE)
+    sh       = _get_sh(uid)
     # Run in a thread pool so it doesn't block the event loop
     await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: sync_plan_effectiveness_logs(
-            force_resync=True, goals=goals, fasting=schedule, mode=mode,
+            force_resync=True, goals=goals, fasting=schedule, mode=mode, pre_sh=sh,
         )
     )
     return {"ok": True}
 
 
 @app.get("/api/debug/weight")
-async def debug_weight():
+async def debug_weight(user_id: str = Query(DEFAULT_USER)):
     """Temporary debug endpoint — shows raw Weight_Logs sheet state."""
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
     try:
-        sh = _get_sh()
+        sh = _get_sh(uid)
         try:
             ws = sh.worksheet(WS_WEIGHT_LOGS)
         except Exception as e:
@@ -1119,10 +1139,10 @@ async def debug_weight():
         headers = list(raw[0].keys()) if raw else []
         sample  = raw[:3] + (raw[-3:] if len(raw) > 6 else [])
         # Also run the actual parse so we can see what's produced
-        _invalidate("weight_history")
-        _invalidate("lowest_weight")
-        parsed_history = _read_weight_history()
-        parsed_lowest  = _read_lowest_weight()
+        _invalidate(f"weight_history_{uid}")
+        _invalidate(f"lowest_weight_{uid}")
+        parsed_history = _read_weight_history(uid)
+        parsed_lowest  = _read_lowest_weight(uid)
         return {
             "ws_name":        WS_WEIGHT_LOGS,
             "row_count":      len(raw),

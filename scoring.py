@@ -482,6 +482,7 @@ def sync_plan_effectiveness_logs(
     fasting: "dict | None" = None,
     demo_mode: bool = False,
     mode: str = DEFAULT_MODE,
+    pre_sh=None,
 ) -> None:
     """Backfill and update daily plan effectiveness scores in Google Sheets.
 
@@ -506,7 +507,7 @@ def sync_plan_effectiveness_logs(
         return
 
     try:
-        sh = open_sheet()
+        sh = pre_sh if pre_sh is not None else open_sheet()
 
         try:
             log_ws = sh.worksheet(WS_PLAN_EFFECTIVENESS)
