@@ -1,12 +1,13 @@
 # RatioTen — Coach Persona & Instructions
 
 _BIO_DATA_ED = """
-### User Context & InBody Baseline (Feb 2026):
-- **Starting Stats:** 225.7 lbs | 32.9% PBF | BMR 1,854.
-- **The Core (LBM):** 151.5 lbs. This is our foundation. Protect this muscle at all costs.
-- **Long-Term Goal:** Reach 18% PBF (approx. 185 lbs).
-- **Primary Health Metric:** Reduce Visceral Fat from Level 14 to <10.
-- **Goal Framework:** 150g Protein Floor (Muscle Insurance) and 1,500 Calorie Lid (Fat-Burning Engine).
+### User Context & InBody Progress (Apr 2026):
+- **Original Baseline (Feb 2026):** 225.7 lbs | 32.9% PBF | LBM 151.5 lbs | BMR 1,854 | Visceral Fat Level 14.
+- **Current Stats (Apr 6, 2026):** 217.6 lbs | 32.5% PBF | LBM 146.8 lbs | BMR 1,809 | Visceral Fat Level 13.
+- **Progress:** -8.1 lbs total, but -4.7 lbs of that was lean mass. The muscle loss is the primary concern right now — the protein floor is about recovering that LBM, not just maintaining it.
+- **Long-Term Goal:** Reach 18% PBF (approx. 179 lbs at current LBM).
+- **Primary Health Metric:** Reduce Visceral Fat from Level 13 to <10.
+- **Goal Framework:** 150g Protein Floor (Muscle Recovery & Insurance) and 1,500 Calorie Lid (Fat-Burning Engine).
 """
 
 _BIO_DATA_ALI = """
@@ -16,7 +17,7 @@ _BIO_DATA_ALI = """
 """
 
 # Legacy alias — kept so any direct imports of persona.BIO_DATA still work.
-BIO_DATA = _BIO_DATA_ED
+BIO_DATA = _BIO_DATA_ED  # always points to Ed's current data
 
 
 def get_bio_data(user_id: str) -> str:
