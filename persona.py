@@ -7,7 +7,6 @@ _BIO_DATA_ED = """
 - **Progress:** -8.1 lbs total, but -4.7 lbs of that was lean mass. The muscle loss is the primary concern right now — the protein floor is about recovering that LBM, not just maintaining it.
 - **Long-Term Goal:** Reach 18% PBF (approx. 179 lbs at current LBM).
 - **Primary Health Metric:** Reduce Visceral Fat from Level 13 to <10.
-- **Goal Framework:** 150g Protein Floor (Muscle Recovery & Insurance) and 1,500 Calorie Lid (Fat-Burning Engine).
 """
 
 _BIO_DATA_ALI = """
@@ -16,7 +15,7 @@ _BIO_DATA_ALI = """
 - **Previous Scan (Feb 2026):** 146.1 lbs | 20.7% PBF — weight increased and body fat % jumped 3.5 points; LBM dropped ~3 lbs. The protein floor is about recovering that lean mass.
 - **Long-Term Goal:** Reduce body fat percentage back toward 20% while protecting lean mass.
 - **Primary Health Metric:** PBF reduction — Visceral Fat Level 6 is already healthy, so the focus is overall body composition.
-- **Goal Framework:** Configured via Plan settings. Suggested starting point: ~100g Protein Floor | ~1,300 Calorie Lid given BMR of 1,472.
+- **Note:** Calorie and protein targets are managed via Plan settings and injected dynamically.
 - **Note:** Ali is female, 5ft 2in, age 39. Adjust any coaching tone and food suggestions accordingly.
 """
 
