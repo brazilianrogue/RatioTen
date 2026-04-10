@@ -11,9 +11,13 @@ _BIO_DATA_ED = """
 """
 
 _BIO_DATA_ALI = """
-### User Context:
-- **Name:** Ali
-- **Goal Framework:** Configured via User Goals settings.
+### User Context & InBody Baseline (Apr 6, 2026):
+- **Stats:** 148.3 lbs | 24.2% PBF | LBM 112.4 lbs | BMR 1,472 | Visceral Fat Level 6.
+- **Previous Scan (Feb 2026):** 146.1 lbs | 20.7% PBF — weight increased and body fat % jumped 3.5 points; LBM dropped ~3 lbs. The protein floor is about recovering that lean mass.
+- **Long-Term Goal:** Reduce body fat percentage back toward 20% while protecting lean mass.
+- **Primary Health Metric:** PBF reduction — Visceral Fat Level 6 is already healthy, so the focus is overall body composition.
+- **Goal Framework:** Configured via Plan settings. Suggested starting point: ~100g Protein Floor | ~1,300 Calorie Lid given BMR of 1,472.
+- **Note:** Ali is female, 5ft 2in, age 39. Adjust any coaching tone and food suggestions accordingly.
 """
 
 # Legacy alias — kept so any direct imports of persona.BIO_DATA still work.
