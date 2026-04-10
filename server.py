@@ -612,26 +612,26 @@ DO NOT pull food items from previous days' conversation history into today's tab
             cals_under_target = today_stats['cals'] < int(goals['calories'] * 0.70)
             if protein_done and is_evening:
                 mode_text = (
-                    "CLOSE-OF-DAY MODE (BULK): Protein floor is ACHIEVED and it is evening. "
+                    "CLOSE-OF-DAY MODE (RECOMP): Protein floor is ACHIEVED and it is evening. "
                     "Shift to a warm wrap-up tone. Review whether the calorie surplus target was hit. "
                     "If surplus was missed, note it as a growth opportunity left on the table. "
                     "If surplus was hit, celebrate the consistency."
                 )
             elif protein_done:
                 mode_text = (
-                    "PROTEIN COMPLETE (BULK): The protein floor has been hit. "
+                    "PROTEIN COMPLETE (RECOMP): The protein floor has been hit. "
                     "Focus coaching on whether the calorie surplus target is being met. "
                     "Encourage eating to the target if there's still room."
                 )
             elif cals_under_target and is_evening:
                 mode_text = (
-                    "CALORIE FLOOR ALERT (BULK): It's evening and calories are significantly "
+                    "CALORIE FLOOR ALERT (RECOMP): It's evening and calories are significantly "
                     "under the surplus target. The user is under-fueling for growth. "
                     "Suggest calorie-dense, protein-rich options to close the gap."
                 )
             else:
                 mode_text = (
-                    "ACTIVE LOGGING MODE (BULK): Acknowledge the log warmly and show running totals. "
+                    "ACTIVE LOGGING MODE (RECOMP): Acknowledge the log warmly and show running totals. "
                     "If protein is behind, suggest high-protein options. "
                     "If calories are under target, gently encourage eating to fuel growth. "
                     "Keep the response brief."
@@ -707,7 +707,7 @@ You are the RatioTen Assistant — a knowledgeable, friendly nutrition coach. Yo
 Core Logic:
 - Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
-- **Current Training Mode:** {"BULK (Muscle Growth Phase)" if is_bulk else "CUT (Fat Loss Phase)"}
+- **Current Training Mode:** {"RECOMP (Muscle Growth / Maintenance Phase)" if is_bulk else "CUT (Fat Loss Phase)"}
 
 {stats_context}{coaching_mode}
 {logs_context}

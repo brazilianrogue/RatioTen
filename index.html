@@ -802,7 +802,7 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       <div class="mode-toggle-label">Training Mode</div>
       <div class="mode-toggle-track" id="mode-toggle" onclick="toggleMode()">
         <div class="mode-toggle-option mode-cut-label" id="mode-cut-label">CUT</div>
-        <div class="mode-toggle-option mode-bulk-label" id="mode-bulk-label">BULK</div>
+        <div class="mode-toggle-option mode-bulk-label" id="mode-bulk-label">RECOMP</div>
         <div class="mode-toggle-thumb" id="mode-thumb"></div>
       </div>
       <div class="mode-toggle-desc" id="mode-desc">Fat loss &amp; muscle preservation</div>
@@ -874,7 +874,7 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
 <div id="profile-modal" class="modal-overlay hidden" onclick="if(event.target===this)cancelModeSwitch()">
   <div class="modal-card">
     <div class="modal-hdr">
-      <span class="modal-title" id="profile-modal-title">Switch to Bulk Mode</span>
+      <span class="modal-title" id="profile-modal-title">Switch to Recomp Mode</span>
       <button class="modal-close" onclick="cancelModeSwitch()">×</button>
     </div>
 
@@ -1586,8 +1586,8 @@ function renderEffectiveness(eff) {
         <div style="grid-column:1/-1;text-align:center;padding:16px 0">
           <div style="font-size:0.9rem;font-weight:600;color:var(--accent);letter-spacing:0.05em;margin-bottom:6px">CALIBRATING</div>
           <div style="font-size:0.8rem;color:var(--muted);line-height:1.6;margin-bottom:14px">
-            Score goes live once ${daysNeeded} days of bulk data are in.<br>
-            <strong style="color:var(--text)">${daysLogged} of ${daysNeeded} days</strong> logged under Bulk.
+            Score goes live once ${daysNeeded} days of recomp data are in.<br>
+            <strong style="color:var(--text)">${daysLogged} of ${daysNeeded} days</strong> logged under Recomp.
           </div>
           <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;max-width:160px;margin:0 auto">
             <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:2px;transition:width 0.4s"></div>
@@ -1649,7 +1649,7 @@ function renderEffectiveness(eff) {
     ? "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥8.5%)\n• Moderate (7.0–8.4%)\n• Improve (<7.0%)"
     : "Overall Calorie-Weighted Protein Density (Total Protein/Total Calories).\nStatuses:\n• Lean (≥10.5%)\n• Moderate (9.5–10.4%)\n• Improve (<9.5%)";
   const tipWeight   = state.mode === 'bulk'
-    ? "Weight trend across the bulk window (first-half vs second-half minimum).\nStatuses:\n• On Track (≥0.25 lbs gained)\n• Minimal (<0.25 lbs gained)\n• Losing (weight dropped)"
+    ? "Weight trend across the recomp window (first-half vs second-half minimum).\nStatuses:\n• On Track (≥0.25 lbs gained)\n• Minimal (<0.25 lbs gained)\n• Losing (weight dropped)"
     : "14-day weight shift (Week 1 vs Week 2).\nStatuses:\n• Losing (≥0.8 lbs drop)\n• Steady (0-0.7 lbs drop)\n• Gaining (Weight increased)";
   const tipLogging  = "Percentage of days logged in the past 14 days.\nStatuses:\n• Consistent (≥80%)\n• Partial (60-79%)\n• Sparse (<60%)";
 
@@ -1679,8 +1679,8 @@ function renderEffectiveness(eff) {
       modeIndicator.innerHTML = `
         <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,183,0,0.07);border:1px solid rgba(255,183,0,0.2);border-radius:8px;margin-top:10px">
           <div style="flex:1">
-            <div style="font-size:0.75rem;color:var(--accent);font-weight:600;letter-spacing:0.04em;margin-bottom:3px">BULK WINDOW FILLING</div>
-            <div style="font-size:0.78rem;color:var(--muted);line-height:1.5"><strong style="color:var(--text)">${mDays} of ${mTarget} bulk days</strong> in scoring window — score stabilises as window fills.</div>
+            <div style="font-size:0.75rem;color:var(--accent);font-weight:600;letter-spacing:0.04em;margin-bottom:3px">RECOMP WINDOW FILLING</div>
+            <div style="font-size:0.78rem;color:var(--muted);line-height:1.5"><strong style="color:var(--text)">${mDays} of ${mTarget} recomp days</strong> in scoring window — score stabilises as window fills.</div>
           </div>
           <div style="text-align:right;min-width:36px">
             <div style="font-size:0.95rem;font-weight:700;color:var(--accent)">${mDays}/${mTarget}</div>
@@ -1748,13 +1748,13 @@ function coachTip(d) {
   const bulk    = state.mode === 'bulk';
 
   if (bulk) {
-    if (logPct < 70)               return 'Score needs more data — bulk mode requires 7 days of logged entries to calibrate properly. Log each meal as you eat it for the most accurate read.';
-    if (shift > 0.5)               return 'You\'re losing weight in bulk mode — the surplus isn\'t landing. Hit your calorie floor consistently this week.';
-    if (adRate < 75)               return 'Missing protocol targets in bulk stalls growth. The surplus has to be reliable, not occasional.';
+    if (logPct < 70)               return 'Score needs more data — recomp mode requires 7 days of logged entries to calibrate properly. Log each meal as you eat it for the most accurate read.';
+    if (shift > 0.5)               return 'You\'re losing weight in recomp mode — the surplus isn\'t landing. Hit your calorie floor consistently this week.';
+    if (adRate < 75)               return 'Missing protocol targets in recomp stalls growth. The surplus has to be reliable, not occasional.';
     if (shift < -1.5)              return 'Gaining faster than 1.5 lbs/week — excess fat accumulation is likely. Consider trimming 150–200 kcal from the surplus.';
     if (density < 7.5)             return 'Protein density is low even in a surplus. Muscle synthesis needs amino acids available — add a high-protein anchor to your two biggest meals.';
     if (shift > 0 && shift <= 0.5) return 'Weight is barely moving. Confirm you\'re consistently hitting the calorie floor — growth stalls without a reliable surplus.';
-    return 'Clean bulk. Weight moving at the right pace, protein is solid. This is how lean mass gets built.';
+    return 'Clean recomp. Weight moving at the right pace, protein is solid. This is how lean mass gets built.';
   }
 
   if (logPct < 70)               return 'Score needs more data — log at least 5 more days this week for a reliable read. Logging as you eat keeps the data honest.';
@@ -1938,7 +1938,7 @@ function openProfileModal(pendingMode) {
   // pendingMode = 'cut'/'bulk' when switching; null when opened standalone (Help Me Decide)
   _pendingMode = pendingMode;
   const targetMode = pendingMode ?? state.mode;
-  const modeLabel  = targetMode === 'bulk' ? 'Bulk' : 'Cut';
+  const modeLabel  = targetMode === 'bulk' ? 'Recomp' : 'Cut';
   document.getElementById('profile-modal-title').textContent =
     pendingMode ? `Switch to ${modeLabel} Mode` : 'Recalculate Targets';
 
@@ -1970,11 +1970,11 @@ function showProfileSetup() {
 
 function showTargetsConfirm(profile, mode) {
   const targets   = calcTargetsFromProfile(profile, mode);
-  const modeLabel = mode === 'bulk' ? 'Bulk' : 'Cut';
+  const modeLabel = mode === 'bulk' ? 'Recomp' : 'Cut';
   document.getElementById('profile-targets-msg').textContent =
     `Recommended targets for ${modeLabel} mode based on your profile. Adjust if needed.`;
   document.getElementById('profile-guidance').innerHTML = mode === 'bulk'
-    ? `<strong style="color:var(--blue)">Bulk Phase:</strong> Moderate surplus for lean muscle growth. Target ~0.5–1.0 lb/week gain.`
+    ? `<strong style="color:var(--blue)">Recomp Phase:</strong> Moderate surplus for lean muscle growth. Target ~0.5–1.0 lb/week gain.`
     : `<strong style="color:var(--accent)">Cut Phase:</strong> ~600 kcal deficit for ~1.2 lbs/week fat loss while preserving muscle.`;
   document.getElementById('modal-cals-label').textContent = mode === 'bulk' ? 'Calorie Floor' : 'Calorie Lid';
   setModalGoalDisplay('cals', targets.cals);

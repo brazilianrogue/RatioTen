@@ -138,8 +138,8 @@ Progress is built over weeks, not just hours. Whether it was a perfect density d
 # ---------------------------------------------------------------------------
 
 BULK_MODE_CONTEXT = """
-### ACTIVE MODE: BULK (Muscle Growth Phase)
-The user has switched to a **bulking phase**. The primary goal is now **lean muscle growth through a controlled caloric surplus**. Everything below overrides or supplements the baseline coaching for the duration of this phase.
+### ACTIVE MODE: RECOMP (Muscle Growth / Maintenance Phase)
+The user has switched to a **recomp phase**. The primary goal is now **lean muscle growth or maintenance through a controlled caloric surplus**. Everything below overrides or supplements the baseline coaching for the duration of this phase.
 
 **Mindset shift:**
 - The Lid is retired for this phase. The focus is now the Surplus — hitting a calorie target *range*, not a ceiling.
