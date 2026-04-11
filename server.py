@@ -480,13 +480,36 @@ def _log_chat_to_sheet(role: str, content, user_id: str = DEFAULT_USER):
         pass
 
 
-def _log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: str = "🍽️", user_id: str = DEFAULT_USER) -> bool:
+def _log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: str = "🍽️", user_id: str = DEFAULT_USER, logged_at: str | None = None) -> bool:
+    """Write a meal entry to the primary sheet.
+
+    Parameters
+    ----------
+    logged_at:
+        Optional "HH:MM" string for retroactive same-day logging.
+        Must be earlier than the current time; silently falls back to
+        now() if the value is missing, unparseable, or in the future.
+    """
     try:
         sh = _get_sh(user_id)
         ws = sh.sheet1
         now = datetime.now(EASTERN)
-        ts = now.strftime("%Y-%m-%d %H:%M:%S")
-        y, w, _ = now.isocalendar()
+
+        # Resolve the log timestamp — retroactive if valid, current otherwise
+        log_dt = now
+        if logged_at:
+            try:
+                t = datetime.strptime(logged_at, "%H:%M").time()
+                candidate = datetime.combine(now.date(), t, tzinfo=EASTERN)
+                if candidate < now:          # must be earlier today
+                    log_dt = candidate
+                else:
+                    log.warning("_log_to_sheet: logged_at %r is in the future — using now()", logged_at)
+            except ValueError:
+                log.warning("_log_to_sheet: could not parse logged_at %r — using now()", logged_at)
+
+        ts = log_dt.strftime("%Y-%m-%d %H:%M:%S")
+        y, w, _ = log_dt.isocalendar()
         week_num = f"{y}-W{w:02d}"
         mode = _read_user_goals(user_id).get("mode", DEFAULT_MODE)
         ws.append_row([ts, item, calories, protein, density, week_num, emoji, mode])
@@ -761,6 +784,7 @@ JSON Output for Database Logging:
 ]
 ```
 - Only include the JSON block if new food is being logged.
+- If the user explicitly states they ate something at a specific earlier time today (e.g. "I had eggs at 8am", "logging lunch from noon"), include an optional `"logged_at": "HH:MM"` field (24-hour format) in that entry. Only include it when a past time is clearly stated — never guess or infer a time. Do not include it for food being logged now.
 """
 
 
@@ -1009,6 +1033,7 @@ async def chat(
                     str(entry.get("density", "0.0%")),
                     str(entry.get("emoji", "🍽️")),
                     uid,
+                    logged_at=entry.get("logged_at"),  # optional "HH:MM", same-day only
                 )
                 if ok:
                     logged_items.append(entry)
