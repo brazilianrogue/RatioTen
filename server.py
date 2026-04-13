@@ -17,7 +17,8 @@ from typing import Optional
 
 import gspread
 import pandas as pd
-from fastapi import FastAPI, Form, HTTPException, Query, UploadFile, File
+from fastapi import Body, FastAPI, Form, HTTPException, Query, UploadFile, File
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
@@ -521,6 +522,66 @@ def _log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: s
         return False
 
 
+def _replace_log_entry(
+    replaces_item: str,
+    new_item: str,
+    calories: int,
+    protein: int,
+    density: str,
+    emoji: str,
+    user_id: str = DEFAULT_USER,
+) -> dict | None:
+    """Overwrite the most recent today-row whose item matches *replaces_item*.
+
+    Returns the old entry dict on success, or None if no match found
+    (caller should fall back to a normal append).
+    """
+    try:
+        sh = _get_sh(user_id)
+        ws = sh.sheet1
+        values = ws.get_all_values()
+        if len(values) <= 1:
+            return None
+        now = datetime.now(EASTERN)
+        today_key = now.strftime("%Y-%m-%d")
+        target = replaces_item.strip().lower()
+        match_idx = None   # index into values list (0 = header)
+        old_entry = None
+        for i, row in enumerate(values):
+            if i == 0:
+                continue  # skip header
+            if not row or len(row) < 2:
+                continue
+            try:
+                ts = datetime.strptime(str(row[0]), "%Y-%m-%d %H:%M:%S")
+                if ts.strftime("%Y-%m-%d") != today_key:
+                    continue
+                if str(row[1]).strip().lower() == target:
+                    match_idx = i
+                    old_entry = {
+                        "item":     str(row[1]),
+                        "calories": int(float(row[2])) if len(row) > 2 and row[2] else 0,
+                        "protein":  int(float(row[3])) if len(row) > 3 and row[3] else 0,
+                        "density":  str(row[4]).strip() if len(row) > 4 and row[4] else "0.0%",
+                    }
+            except Exception:
+                continue
+        if match_idx is None:
+            return None
+        orig = values[match_idx]
+        ts_str   = orig[0]
+        week_num = orig[5] if len(orig) > 5 else ""
+        mode     = orig[7] if len(orig) > 7 else DEFAULT_MODE
+        sheet_row = match_idx + 1  # gspread rows are 1-based
+        ws.update(f"A{sheet_row}:H{sheet_row}", [[ts_str, new_item, calories, protein, density, week_num, emoji, mode]])
+        _invalidate(f"today_logs_{user_id}")
+        _invalidate(f"trailing_7_{user_id}")
+        return old_entry
+    except Exception as e:
+        log.error("_replace_log_entry failed: %s", e)
+        return None
+
+
 def get_fasting_status(schedule: dict) -> tuple[str, Optional[float]]:
     now = datetime.now(EASTERN)
     day_name = now.strftime("%A")
@@ -889,6 +950,7 @@ async def logs_today(user_id: str = Query(DEFAULT_USER)):
     for l in today_logs:
         entry = {k: v for k, v in l.items() if k != "timestamp"}
         entry["time"] = l["timestamp"].strftime("%H:%M") if isinstance(l.get("timestamp"), datetime) else ""
+        entry["ts"]   = l["timestamp"].strftime("%Y-%m-%d %H:%M:%S") if isinstance(l.get("timestamp"), datetime) else ""
         # Pre-compute position % for timeline rendering on the client
         if day_sched["start"] and day_sched["end"]:
             try:
@@ -929,6 +991,60 @@ async def clear_chat(user_id: str = Query(DEFAULT_USER)):
         ws.append_row(["Timestamp", "Role", "Parts"])
         _invalidate(f"chat_history_{uid}")
         return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteLogsRequest(BaseModel):
+    timestamps: list[str]
+    user_id: str = DEFAULT_USER
+
+
+@app.post("/api/logs/delete")
+async def delete_logs(req: DeleteLogsRequest):
+    uid = req.user_id if req.user_id in USER_CONFIGS else DEFAULT_USER
+    try:
+        sh = _get_sh(uid)
+        ws = sh.sheet1
+        values = ws.get_all_values()
+        ts_set = set(req.timestamps)
+        rows_to_delete = []
+        deleted_items = []
+        for i, row in enumerate(values):
+            if i == 0:
+                continue  # skip header
+            if not row:
+                continue
+            if str(row[0]).strip() in ts_set:
+                rows_to_delete.append(i + 1)  # gspread rows are 1-based
+                deleted_items.append({
+                    "item":     str(row[1]) if len(row) > 1 else "",
+                    "calories": int(float(row[2])) if len(row) > 2 and row[2] else 0,
+                    "protein":  int(float(row[3])) if len(row) > 3 and row[3] else 0,
+                })
+        if not rows_to_delete:
+            return {"ok": True, "deleted": 0}
+        for row_idx in sorted(rows_to_delete, reverse=True):
+            ws.delete_rows(row_idx)
+        _invalidate(f"today_logs_{uid}")
+        _invalidate(f"trailing_7_{uid}")
+        # Inject a context message into chat history so the AI stays aware
+        if deleted_items:
+            items_str = ", ".join(
+                f"{d['item']} ({d['calories']} cal / {d['protein']}g)"
+                for d in deleted_items
+            )
+            new_logs  = _read_today_logs(uid)
+            new_cals  = sum(l["calories"] for l in new_logs)
+            new_prot  = sum(l["protein"]  for l in new_logs)
+            new_dens  = f"{(new_prot / new_cals * 100):.1f}%" if new_cals else "0.0%"
+            ctx_msg = (
+                f"[System: User removed the following items from today's log via the log manager: "
+                f"{items_str}. Updated day totals: {new_cals} cal / {new_prot}g protein / {new_dens} density.]"
+            )
+            _log_chat_to_sheet("user", ctx_msg, uid)
+            _invalidate(f"chat_history_{uid}")
+        return {"ok": True, "deleted": len(rows_to_delete)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1026,6 +1142,22 @@ async def chat(
         logged_items = []
         if meal_log:
             for entry in meal_log:
+                replaces = entry.get("replaces")
+                if replaces:
+                    # Correction flow: overwrite the most recent matching row
+                    old = _replace_log_entry(
+                        replaces,
+                        entry["item"],
+                        int(entry.get("calories", 0)),
+                        int(entry.get("protein", 0)),
+                        str(entry.get("density", "0.0%")),
+                        str(entry.get("emoji", "🍽️")),
+                        uid,
+                    )
+                    if old is not None:
+                        logged_items.append({**entry, "_replaced": old})
+                        continue
+                    # No match found — fall through to normal append
                 ok = _log_to_sheet(
                     entry["item"],
                     int(entry.get("calories", 0)),

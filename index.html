@@ -171,6 +171,75 @@ body[data-mode="bulk"] {
 .tl-label { font-size:0.58rem; color:rgba(255,255,255,0.35); position:absolute; }
 .tl-start { left:6px; top:50%; transform:translateY(-50%); }
 .tl-end   { right:6px; top:50%; transform:translateY(-50%); }
+#timeline-wrap { cursor: pointer; }
+
+/* ── Log Manager Bottom Sheet ─────────────────────────────────────────── */
+.log-sheet-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55); z-index: 200;
+}
+.log-sheet-overlay.open { display: block; }
+#log-sheet {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--surface); border-radius: 16px 16px 0 0;
+  z-index: 201; max-height: 72vh;
+  display: flex; flex-direction: column;
+  transform: translateY(100%); transition: transform 0.28s ease;
+}
+#log-sheet.open { transform: translateY(0); }
+.log-sheet-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem; font-weight: 600; flex-shrink: 0;
+}
+.log-sheet-close {
+  background: none; border: none; color: var(--muted);
+  font-size: 1rem; cursor: pointer; padding: 4px 6px; line-height: 1;
+}
+.log-sheet-body { overflow-y: auto; flex: 1; padding: 4px 0; }
+.log-item-row {
+  display: grid;
+  grid-template-columns: 1fr 44px 58px 44px 46px;
+  gap: 6px; align-items: center;
+  padding: 9px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 0.8rem;
+}
+.log-item-row:last-child { border-bottom: none; }
+.log-item-name {
+  min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.log-item-time { color: var(--muted); text-align: right; white-space: nowrap; }
+.log-item-cals { color: var(--accent); text-align: right; white-space: nowrap; }
+.log-item-prot { color: var(--blue); text-align: right; white-space: nowrap; }
+.log-item-del {
+  background: none; border: 1px solid rgba(220,53,69,0.45);
+  color: rgba(220,53,69,0.85); cursor: pointer;
+  padding: 3px 0; border-radius: 6px; font-size: 0.72rem;
+  width: 100%; text-align: center;
+}
+.log-item-row.marked .log-item-name,
+.log-item-row.marked .log-item-time,
+.log-item-row.marked .log-item-cals,
+.log-item-row.marked .log-item-prot { text-decoration: line-through; opacity: 0.38; }
+.log-item-row.marked .log-item-del {
+  background: rgba(220,53,69,0.12); color: rgba(220,53,69,0.45);
+  border-color: rgba(220,53,69,0.2);
+}
+.log-sheet-footer {
+  padding: 10px 18px 18px; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.log-sheet-save {
+  width: 100%; background: var(--blue); color: #fff;
+  border: none; border-radius: 10px; padding: 13px;
+  font-size: 0.9rem; font-weight: 600; cursor: pointer; letter-spacing: 0.01em;
+}
+.log-sheet-save:disabled { opacity: 0.35; cursor: default; }
+.log-sheet-empty {
+  color: var(--muted); text-align: center; padding: 32px 0; font-size: 0.85rem;
+}
 
 /* ── History timelines ────────────────────────────────────────────────── */
 .hist-day {
@@ -1347,6 +1416,90 @@ function renderTimeline(logs, window, dash) {
     </div>`;
 }
 
+// ── Log Manager Bottom Sheet ──────────────────────────────────────────────
+let _logItems  = [];   // current today logs from server
+let _logMarked = new Set(); // ts strings marked for deletion
+
+function openLogSheet() {
+  _logMarked = new Set();
+  document.getElementById('log-sheet-overlay').classList.add('open');
+  document.getElementById('log-sheet').classList.add('open');
+  _fetchLogSheet();
+}
+
+function closeLogSheet() {
+  document.getElementById('log-sheet-overlay').classList.remove('open');
+  document.getElementById('log-sheet').classList.remove('open');
+}
+
+async function _fetchLogSheet() {
+  const body = document.getElementById('log-sheet-body');
+  body.innerHTML = `<div class="log-sheet-empty">Loading…</div>`;
+  document.getElementById('log-sheet-save').disabled = true;
+  try {
+    const data = await fetch(`/api/logs/today?user_id=${getUserId()}`).then(r => r.json());
+    _logItems = data.logs || [];
+    _renderLogSheet();
+  } catch(e) {
+    body.innerHTML = `<div class="log-sheet-empty">Could not load today's log.</div>`;
+  }
+}
+
+function _renderLogSheet() {
+  const body    = document.getElementById('log-sheet-body');
+  const saveBtn = document.getElementById('log-sheet-save');
+  if (_logItems.length === 0) {
+    body.innerHTML = `<div class="log-sheet-empty">Nothing logged today.</div>`;
+    saveBtn.disabled = true;
+    return;
+  }
+  saveBtn.disabled = (_logMarked.size === 0);
+  body.innerHTML = _logItems.map((item, i) => {
+    const marked = _logMarked.has(item.ts);
+    return `<div class="log-item-row${marked ? ' marked' : ''}">
+      <span class="log-item-name" title="${esc(item.item)}">${esc(item.item)}</span>
+      <span class="log-item-time">${esc(item.time)}</span>
+      <span class="log-item-cals">${item.calories}c</span>
+      <span class="log-item-prot">${item.protein}g</span>
+      <button class="log-item-del" onclick="toggleLogMark(${i})">${marked ? 'Undo' : '✕'}</button>
+    </div>`;
+  }).join('');
+}
+
+function toggleLogMark(idx) {
+  const item = _logItems[idx];
+  if (!item || !item.ts) return;
+  if (_logMarked.has(item.ts)) _logMarked.delete(item.ts);
+  else _logMarked.add(item.ts);
+  _renderLogSheet();
+}
+
+async function saveLogDeletions() {
+  if (_logMarked.size === 0) return;
+  const saveBtn = document.getElementById('log-sheet-save');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/logs/delete', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ timestamps: [..._logMarked], user_id: getUserId() }),
+    });
+    if (!res.ok) throw new Error('Server error');
+    closeLogSheet();
+    await loadDashboard();
+  } catch(e) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save Changes';
+    const errEl = document.createElement('div');
+    errEl.style.cssText = 'color:var(--red);text-align:center;padding:8px 18px;font-size:0.78rem;';
+    errEl.textContent = 'Failed to save — please try again.';
+    document.getElementById('log-sheet-body').prepend(errEl);
+  }
+}
+
+document.getElementById('timeline-wrap').addEventListener('click', openLogSheet);
+
 // ── Chat ───────────────────────────────────────────────────────────────────
 async function loadChatHistory() {
   try {
@@ -2510,6 +2663,19 @@ function showMsg(id, msg, color) {
   }).catch(()=>{});
 })();
 </script>
+<!-- Log Manager Bottom Sheet -->
+<div class="log-sheet-overlay" id="log-sheet-overlay" onclick="closeLogSheet()"></div>
+<div id="log-sheet" role="dialog" aria-modal="true" aria-label="Today's Log">
+  <div class="log-sheet-header">
+    <span>Today's Log</span>
+    <button class="log-sheet-close" onclick="closeLogSheet()" aria-label="Close">✕</button>
+  </div>
+  <div class="log-sheet-body" id="log-sheet-body"></div>
+  <div class="log-sheet-footer">
+    <button class="log-sheet-save" id="log-sheet-save" onclick="saveLogDeletions()">Save Changes</button>
+  </div>
+</div>
+
 <!-- Driver info bottom sheet -->
 <div id="driver-sheet-backdrop" onclick="closeDriverSheet()"></div>
 <div id="driver-sheet" role="dialog" aria-modal="true">

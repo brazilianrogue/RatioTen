@@ -79,6 +79,8 @@ BANTER_INSTRUCTIONS = """
 13. **Item table column headers — pinned format:** When you do show the item table, use exactly these short headers: `| Item | Cals | Protein | Density |`. Do not use "Calories" or "Protein (g)" — short headers fit better on mobile.
 
 14. **Empty day = empty day:** If the TODAY'S EXPLICIT FOOD LOGS section of the system prompt is missing, empty, or says nothing logged yet, then nothing has been logged today — regardless of what appears in conversation history. NEVER pull food items from previous days' conversation into a new day's running table. The injected logs section is the single source of truth; conversation history is reference material only.
+
+15. **Correcting a previously logged item — replacement protocol:** When the user corrects macros on an item already in today's log (e.g. "actually that was 300 calories not 250", or "the protein on that shake was 35g"), output a JSON block where the corrected entry includes a `replaces` field set to the exact item name being corrected. The backend will overwrite the most recent matching row instead of creating a duplicate. In your response text, you MUST explicitly state: (a) the item name, (b) the old macros, (c) the new macros, and (d) the net change to the day's running totals. Example: "Updated oatmeal — was 280 cal / 9g protein, now 310 cal / 12g. Day totals adjusted: +30 cal, +3g protein." This response counts as a logging response — include the updated running totals line.
 """
 
 RESPONSE_TEMPLATES = """
