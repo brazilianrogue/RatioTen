@@ -392,6 +392,72 @@ def _read_logs_history(days: int = 10, user_id: str = DEFAULT_USER) -> dict:
         return {}
 
 
+_QTY_RE = re.compile(
+    r"\b\d+\.?\d*\s*"
+    r"(g|oz|ml|lb|lbs|cup|cups|scoop|scoops|piece|pieces|slice|slices|"
+    r"serving|servings|tbsp|tsp|tablespoon|tablespoons|teaspoon|teaspoons|"
+    r"bottle|bottles|pack|packs|bar|bars|can|cans)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_food_name(name: str) -> str:
+    normalized = _QTY_RE.sub("", name)
+    return re.sub(r"\s+", " ", normalized).strip().lower()
+
+
+def _has_quantity(name: str) -> bool:
+    return bool(_QTY_RE.search(name))
+
+
+def _read_food_memory(user_id: str = DEFAULT_USER) -> list[dict]:
+    """Return top-75 foods by log frequency from the last 90 days.
+
+    Only includes entries with a detectable quantity in the item name.
+    Most recent macros win per normalized food name.
+    """
+    try:
+        sh = _get_sh(user_id)
+        ws = sh.sheet1
+        values = ws.get_all_values()
+        if len(values) <= 1:
+            return []
+        cutoff = (datetime.now(EASTERN) - timedelta(days=90)).date()
+        seen: dict = {}
+        for row in values[1:]:
+            if len(row) < 4:
+                continue
+            try:
+                ts = datetime.strptime(str(row[0]), "%Y-%m-%d %H:%M:%S")
+                if ts.date() < cutoff:
+                    continue
+                item = str(row[1]).strip()
+                if not item or not _has_quantity(item):
+                    continue
+                key = _normalize_food_name(item)
+                if not key:
+                    continue
+                entry = {
+                    "item":     item,
+                    "calories": int(float(row[2])) if row[2] else 0,
+                    "protein":  int(float(row[3])) if len(row) > 3 and row[3] else 0,
+                    "density":  str(row[4]).strip() if len(row) > 4 and row[4] else "0.0%",
+                }
+                if key not in seen:
+                    seen[key] = {"entry": entry, "count": 1, "ts": ts}
+                else:
+                    seen[key]["count"] += 1
+                    if ts > seen[key]["ts"]:
+                        seen[key]["entry"] = entry
+                        seen[key]["ts"] = ts
+            except Exception:
+                continue
+        ranked = sorted(seen.values(), key=lambda x: x["count"], reverse=True)[:75]
+        return [r["entry"] for r in ranked]
+    except Exception:
+        return []
+
+
 def _read_wow(user_id: str = DEFAULT_USER) -> list[dict]:
     """Week-over-week averages."""
     try:
@@ -629,6 +695,26 @@ _CLOSING_PHRASES = (
     "closing the day",
 )
 
+def _build_food_memory_block(food_memory: Optional[list]) -> str:
+    if not food_memory:
+        return ""
+    rows = "\n".join(
+        f"| {e['item']} | {e['calories']} | {e['protein']}g | {e['density']} |"
+        for e in food_memory
+    )
+    return f"""### FOOD MEMORY (personal macro reference — verified from your logs, last 90 days, ranked by frequency):
+Macro lookup priority: **label photo > user-stated macros > food memory > web estimate**
+- If a food semantically matches an entry below, use those macros as the default — do not search the web.
+- If the user's quantity differs from the reference, SCALE proportionally and state it: "Based on your logged [ref item], scaling to [user qty]..."
+- NEVER use these values when a label photo is provided or the user explicitly states macros.
+- NEVER use these values when the user's portion is ambiguous or unstated — ask for the amount instead.
+
+| Food | Cals | Protein | Density |
+|------|------|---------|---------|
+{rows}
+"""
+
+
 def build_system_prompt(
     schedule: dict,
     goals: dict,
@@ -639,6 +725,7 @@ def build_system_prompt(
     user_message: str = "",
     mode: str = DEFAULT_MODE,
     user_id: str = DEFAULT_USER,
+    food_memory: Optional[list] = None,
 ) -> str:
     now = datetime.now(EASTERN)
     formatted_schedule = "\n".join([
@@ -797,6 +884,7 @@ Core Logic:
 {logs_context}
 {weekly_context}
 
+{_build_food_memory_block(food_memory)}
 Fasting Protocol Strict Adherence:
 {formatted_schedule}
 
@@ -1062,6 +1150,7 @@ async def chat(
     custom_instr = _cached(f"custom_instr_{uid}", 600, lambda: _read_custom_instructions(uid))
     history      = _cached(f"chat_history_{uid}", 600, lambda: _read_persistent_chat(uid))
     trailing     = _cached(f"trailing_7_{uid}",   600, lambda: _read_trailing_7_days(uid))
+    food_memory  = _cached(f"food_memory_{uid}",  600, lambda: _read_food_memory(uid))
 
     cals    = sum(l["calories"] for l in today_logs)
     protein = sum(l["protein"]  for l in today_logs)
@@ -1077,6 +1166,7 @@ async def chat(
         user_message=text,
         mode=active_mode,
         user_id=uid,
+        food_memory=food_memory,
     )
 
     # Read image bytes if provided
