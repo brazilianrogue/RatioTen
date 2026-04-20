@@ -1242,11 +1242,13 @@ async function loadDashboard() {
       const nowMs2       = (now2.getHours()*60+now2.getMinutes())*60000 + now2.getSeconds()*1000;
       const startMs2     = (sh2*60+sm2)*60000;
       const hoursElapsed = Math.max(0, (nowMs2 - startMs2) / 3_600_000);
-      const targetRate   = windowHours > 0 ? goals.protein / windowHours : 0;
-      const actualGph    = hoursElapsed > 0 ? prot / hoursElapsed : 0;
-      const expectedProt = targetRate * hoursElapsed;
-      const hoursLate    = targetRate > 0 ? (expectedProt - prot) / targetRate : 0;
-      densVal.textContent = actualGph.toFixed(1) + 'g/h';
+      const targetRate    = windowHours > 0 ? goals.protein / windowHours : 0;
+      const hoursRemaining = Math.max(0, windowHours - hoursElapsed);
+      const protRemaining  = Math.max(0, goals.protein - prot);
+      const requiredGph    = hoursRemaining > 0 ? protRemaining / hoursRemaining : 0;
+      const expectedProt  = targetRate * hoursElapsed;
+      const hoursLate     = targetRate > 0 ? (expectedProt - prot) / targetRate : 0;
+      densVal.textContent = requiredGph.toFixed(1) + 'g/h';
       if (hoursLate > 1) {
         densDelta.textContent = 'Critical';
         densDelta.className   = 'card-delta delta-red';
