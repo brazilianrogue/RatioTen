@@ -93,7 +93,7 @@ def calculate_plan_effectiveness(
     """
     try:
         if calc_date is None:
-            calc_date = datetime.now(EASTERN).date()
+            calc_date = datetime.now(EASTERN).date() - timedelta(days=1)
 
         # --- Demo Mode ---
         if demo_mode:
