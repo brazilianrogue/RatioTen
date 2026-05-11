@@ -411,6 +411,7 @@ _HEADER_FIXES: list[tuple[re.Pattern, str]] = [
 
 def _normalize_food_name(name: str) -> str:
     normalized = _QTY_RE.sub("", name)
+    normalized = re.sub(r"\(\s*\)", "", normalized)   # strip empty parens after unit removal
     return re.sub(r"\s+", " ", normalized).strip().lower()
 
 
@@ -421,8 +422,12 @@ def _has_quantity(name: str) -> bool:
 def _read_food_memory(user_id: str = DEFAULT_USER) -> list[dict]:
     """Return top-75 foods by log frequency from the last 90 days.
 
-    Only includes entries with a detectable quantity in the item name.
-    Most recent macros win per normalized food name.
+    All named items are eligible — no gram/unit filter.  The frequency ranking
+    naturally surfaces reliable entries: if a food appears 30+ times with
+    identical macros it belongs in memory regardless of whether the name
+    includes a weight unit.  Most recent macros win per normalized food name
+    (unit tokens and empty parens stripped for grouping, original name kept for
+    display so the AI sees e.g. "Usual Shake" not "usual shake").
     """
     try:
         sh = _get_sh(user_id)
@@ -440,7 +445,7 @@ def _read_food_memory(user_id: str = DEFAULT_USER) -> list[dict]:
                 if ts.date() < cutoff:
                     continue
                 item = str(row[1]).strip()
-                if not item or not _has_quantity(item):
+                if not item:
                     continue
                 key = _normalize_food_name(item)
                 if not key:
