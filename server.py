@@ -400,6 +400,14 @@ _QTY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Header normalization patterns — applied to every AI response before delivery.
+# The model occasionally drifts to long-form headers despite the prompt rule; this
+# deterministic post-processing enforces the short mobile-friendly format.
+_HEADER_FIXES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\|\s*Calories\s*\|"), "| Cals |"),
+    (re.compile(r"\|\s*Protein\s*\(g\)\s*\|", re.IGNORECASE), "| Protein |"),
+]
+
 
 def _normalize_food_name(name: str) -> str:
     normalized = _QTY_RE.sub("", name)
@@ -835,13 +843,41 @@ DO NOT pull food items from previous days' conversation history into today's tab
                 )
         coaching_mode = f"\n### COACHING MODE (apply this to your response tone and suggestions):\n{mode_text}\n"
 
-    # Trigger close-of-day mode when the user signals they're done eating,
-    # regardless of clock time — "ending the day with..." is a stronger signal than 6 PM.
+    # -----------------------------------------------------------------------
+    # Close-of-day detection
+    #
+    # Priority 1 (strongest): user explicitly signals they're done eating.
+    # Priority 2 (time-based fallback): hour >= 18 PLUS two additional guards
+    #   to prevent the trend table firing on every single late-evening log:
+    #   (a) at least 90 minutes have elapsed since the last logged item, AND
+    #   (b) the protein floor is already hit OR is now mathematically
+    #       unreachable within the remaining calorie budget.
+    # -----------------------------------------------------------------------
     msg_lower = user_message.lower()
     user_signaled_close = any(phrase in msg_lower for phrase in _CLOSING_PHRASES)
-    is_close_of_day = (
-        today_stats is not None
-        and (user_signaled_close or now.hour >= 18)
+
+    # 90-minute gap guard (uses naive timestamps — both are Eastern time)
+    _gap_met = False
+    if today_logs:
+        _last_ts: datetime = max(l["timestamp"] for l in today_logs)
+        _now_naive = now.replace(tzinfo=None)
+        _gap_met = (_now_naive - _last_ts).total_seconds() >= 5400  # 90 min
+
+    # Floor status for the fallback path
+    _floor_hit = today_stats is not None and today_stats["protein"] >= goals["protein"]
+    if today_stats:
+        _cals_left = max(0, goals["calories"] - today_stats["cals"])
+        _prot_left = max(0, goals["protein"] - today_stats["protein"])
+    else:
+        _cals_left = goals["calories"]
+        _prot_left = goals["protein"]
+    # Floor is "unreachable" if hitting it would cost more calories than remain
+    # (using ~4 cal/g as the minimum possible protein calorie cost)
+    _floor_unreachable = _prot_left > 0 and (_prot_left * 4) > _cals_left
+
+    is_close_of_day = today_stats is not None and (
+        user_signaled_close
+        or (now.hour >= 18 and _gap_met and (_floor_hit or _floor_unreachable))
     )
     weekly_context = ""
     if weekly_summary and is_close_of_day:
@@ -979,6 +1015,18 @@ def _parse_meal_log(raw: str):
         return validated if validated else None
     except Exception:
         return None
+
+
+def _normalize_response_headers(text: str) -> str:
+    """Enforce short mobile-friendly table column headers in AI responses.
+
+    Deterministic post-processing so header format is correct regardless of
+    model drift.  Applied line-by-line during streaming so corrections appear
+    before the full response is assembled.
+    """
+    for pattern, replacement in _HEADER_FIXES:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -1196,6 +1244,10 @@ async def chat(
                     parts.append(genai.types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
                 parts.append(genai.types.Part.from_text(text=text))
 
+                # Stream tokens with line-level header normalization (Fix B).
+                # Tokens are buffered until a newline boundary so the regex
+                # can reliably match full column-header lines before delivery.
+                _line_buf = ""
                 for chunk in session.send_message_stream(parts):
                     token = ""
                     try:
@@ -1208,8 +1260,19 @@ async def chat(
                         except Exception:
                             token = ""
                     if token:
-                        full_response += token
-                        yield f"data: {json.dumps({'token': token})}\n\n"
+                        _line_buf += token
+                        # Flush complete lines with normalization applied
+                        while "\n" in _line_buf:
+                            _line, _line_buf = _line_buf.split("\n", 1)
+                            _corrected = _normalize_response_headers(_line)
+                            full_response += _corrected + "\n"
+                            yield f"data: {json.dumps({'token': _corrected + chr(10)})}\n\n"
+
+                # Flush any remaining partial line
+                if _line_buf:
+                    _corrected = _normalize_response_headers(_line_buf)
+                    full_response += _corrected
+                    yield f"data: {json.dumps({'token': _corrected})}\n\n"
 
                 break  # success — don't try next model
 
