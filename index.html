@@ -1107,6 +1107,8 @@ function drawWeightSparkline(history) {
 function mdToHtml(text) {
   // Strip JSON meal-log block (internal logging artifact, never show to user)
   text = text.replace(/```json\s*\[[\s\S]*?\]\s*```/g, '').trim();
+  // Strip flat JSON reservation/directive object block (also internal-only)
+  text = text.replace(/```json\s*\{[\s\S]*?\}\s*```/g, '').trim();
   // Generic code fences → inline block
   text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, '<code style="font-size:0.8rem;color:#a8d8a8;display:block;padding:4px 0;white-space:pre-wrap">$1</code>');
   // Headings

@@ -39,6 +39,7 @@ from constants import (
     WS_FASTING_SCHEDULE,
     WS_USER_GOALS,
     WS_CUSTOM_INSTRUCTIONS,
+    WS_PLANNED_MEAL,
 )
 from scoring import calculate_plan_effectiveness, sync_plan_effectiveness_logs
 
@@ -710,6 +711,132 @@ def _replace_log_entry(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Meal reservations (block-out planning)
+# ---------------------------------------------------------------------------
+
+_RES_STOPWORDS = {"meal", "dinner", "lunch", "snack", "plan", "planned", "today",
+                  "tonight", "night", "later", "the", "and"}
+
+
+def _read_planned_meal(user_id: str = DEFAULT_USER) -> Optional[dict]:
+    """Return today's active planned-meal reservation, or None.
+
+    Reservations are same-day only — a stored row from a prior day is ignored
+    (so a forgotten block-out never bleeds into a new day's math).
+    """
+    try:
+        sh = _get_sh(user_id)
+        try:
+            ws = sh.worksheet(WS_PLANNED_MEAL)
+        except gspread.WorksheetNotFound:
+            return None
+        values = ws.get_all_values()
+        if len(values) <= 1:
+            return None
+        today_key = datetime.now(EASTERN).strftime("%Y-%m-%d")
+        # Scan newest-first for an active, same-day row
+        for row in reversed(values[1:]):
+            if len(row) < 5:
+                continue
+            status = str(row[4]).strip().lower()
+            if status != "active":
+                continue
+            try:
+                d = datetime.strptime(str(row[0]), "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+            if d != today_key:
+                continue
+            return {
+                "item":     str(row[1]),
+                "calories": int(float(row[2])) if row[2] else 0,
+                "protein":  int(float(row[3])) if row[3] else 0,
+            }
+        return None
+    except Exception:
+        return None
+
+
+def _write_planned_meal(item: str, calories: int, protein: int, user_id: str = DEFAULT_USER) -> bool:
+    """Store a new active reservation, clearing any prior active one first."""
+    try:
+        _clear_planned_meal(user_id)
+        sh = _get_sh(user_id)
+        try:
+            ws = sh.worksheet(WS_PLANNED_MEAL)
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title=WS_PLANNED_MEAL, rows="200", cols="5")
+            ws.append_row(["Timestamp", "Item", "Calories", "Protein", "Status"])
+        ts = datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M:%S")
+        ws.append_row([ts, item, int(calories), int(protein), "active"])
+        _invalidate(f"planned_meal_{user_id}")
+        return True
+    except Exception as e:
+        log.error("_write_planned_meal failed: %s", e)
+        return False
+
+
+def _clear_planned_meal(user_id: str = DEFAULT_USER) -> bool:
+    """Mark every active reservation row as consumed/cleared."""
+    try:
+        sh = _get_sh(user_id)
+        try:
+            ws = sh.worksheet(WS_PLANNED_MEAL)
+        except gspread.WorksheetNotFound:
+            return False
+        values = ws.get_all_values()
+        changed = False
+        for i, row in enumerate(values):
+            if i == 0:
+                continue
+            if len(row) >= 5 and str(row[4]).strip().lower() == "active":
+                ws.update_cell(i + 1, 5, "cleared")
+                changed = True
+        if changed:
+            _invalidate(f"planned_meal_{user_id}")
+        return changed
+    except Exception:
+        return False
+
+
+def _parse_reservation(raw: str) -> Optional[dict]:
+    """Extract a flat reservation directive object from the model response.
+
+    Looks for a ```json block containing the key 'reservation_action'.
+    Kept flat (no nesting) so the frontend's fenced-block stripper stays simple.
+    """
+    try:
+        for m in re.finditer(r"```json\s*(\{.*?\})\s*```", raw, re.DOTALL):
+            try:
+                obj = json.loads(m.group(1))
+            except Exception:
+                continue
+            if isinstance(obj, dict) and "reservation_action" in obj:
+                return obj
+        return None
+    except Exception:
+        return None
+
+
+def _looks_like_reserved(entry: dict, reservation: dict) -> bool:
+    """Heuristic backstop: does a freshly-logged item look like the reserved meal?
+
+    Used to auto-release the block-out when the planned meal is actually eaten,
+    in case the model forgot the explicit consumes_reservation flag.  Matches on
+    a shared significant keyword (e.g. 'factor') — deliberately conservative so a
+    normal snack never falsely consumes a reservation.
+    """
+    try:
+        rwords = {w for w in re.findall(r"[a-z]+", str(reservation.get("item", "")).lower())
+                  if len(w) > 3 and w not in _RES_STOPWORDS}
+        ewords = {w for w in re.findall(r"[a-z]+", str(entry.get("item", "")).lower())
+                  if len(w) > 3 and w not in _RES_STOPWORDS}
+        return bool(rwords & ewords)
+    except Exception:
+        return False
+
+
 def get_fasting_status(schedule: dict) -> tuple[str, Optional[float]]:
     now = datetime.now(EASTERN)
     day_name = now.strftime("%A")
@@ -822,6 +949,7 @@ def build_system_prompt(
     user_id: str = DEFAULT_USER,
     food_memory: Optional[list] = None,
     recent_items: Optional[list] = None,
+    planned_meal: Optional[dict] = None,
 ) -> str:
     now = datetime.now(EASTERN)
     formatted_schedule = "\n".join([
@@ -848,6 +976,22 @@ def build_system_prompt(
 - **Current Density:** {today_stats['density']}
 - **{cal_remaining_label}:** {max(0, goals['calories'] - today_stats['cals'])}
 - **Remaining Protein Needed:** {max(0, goals['protein'] - today_stats['protein'])}g
+"""
+
+    reservation_context = ""
+    if planned_meal and today_stats:
+        r_cal  = int(planned_meal.get("calories", 0))
+        r_prot = int(planned_meal.get("protein", 0))
+        r_item = planned_meal.get("item", "Planned meal")
+        avail_cal  = max(0, goals['calories'] - today_stats['cals'] - r_cal)
+        avail_prot = max(0, goals['protein'] - today_stats['protein'] - r_prot)
+        reservation_context = f"""
+### ACTIVE MEAL RESERVATION (block-out — planned, NOT yet eaten; do NOT add it to today's item table):
+- **Reserved for later ("{r_item}"):** {r_cal} cal / {r_prot}g protein
+- **Logged so far:** {today_stats['cals']} cal / {today_stats['protein']}g
+- **AVAILABLE TO DISTRIBUTE (authoritative — use these numbers verbatim, do NOT recompute):** {avail_cal} cal / {avail_prot}g protein still to find from non-dinner items before the floor is met
+- While this reservation is active, EVERY logging response must append this line directly after the normal totals line:
+  **Reserved ({r_item}):** {r_cal} / {r_prot}g | **Available to distribute:** {avail_cal} cal / {avail_prot}g
 """
 
     if today_logs:
@@ -993,6 +1137,7 @@ You are the RatioTen Assistant — a knowledgeable, friendly nutrition coach. Yo
 {persona.VOCABULARY}
 {persona.BANTER_INSTRUCTIONS}
 {persona.RESPONSE_TEMPLATES}
+{persona.RESERVATION_INSTRUCTIONS}
 {"" if not is_close_of_day else (persona.BULK_RELATIONSHIP_CLOSING if is_bulk else persona.RELATIONSHIP_CLOSING)}
 
 {persona.BULK_MODE_CONTEXT if is_bulk else ""}
@@ -1004,7 +1149,7 @@ Core Logic:
 - Calculated explicitly as: (Protein in grams / Total Calories).
 - **Current Training Mode:** {"RECOMP (Muscle Growth / Maintenance Phase)" if is_bulk else "CUT (Fat Loss Phase)"}
 
-{stats_context}{coaching_mode}
+{stats_context}{reservation_context}{coaching_mode}
 {logs_context}
 {weekly_context}
 
@@ -1057,8 +1202,9 @@ JSON Output for Database Logging:
   {{"item": "Food Name", "calories": 150, "protein": 30, "density": "20.0%", "emoji": "🍗🌿"}}
 ]
 ```
-- Only include the JSON block if new food is being logged.
+- Only include the food-log array if new food is actually being eaten/logged now.
 - If the user explicitly states they ate something at a specific earlier time today (e.g. "I had eggs at 8am", "logging lunch from noon"), include an optional `"logged_at": "HH:MM"` field (24-hour format) in that entry. Only include it when a past time is clearly stated — never guess or infer a time. Do not include it for food being logged now.
+- A PLANNED meal (not yet eaten) is NOT a food log — do not put it in this array. Use the separate reservation block described in the Meal Reservations section instead.
 """
 
 
@@ -1350,6 +1496,7 @@ async def chat(
     trailing     = _cached(f"trailing_7_{uid}",   600, lambda: _read_trailing_7_days(uid))
     food_memory  = _cached(f"food_memory_{uid}",  600, lambda: _read_food_memory(uid))
     recent_items = _cached(f"recent_items_{uid}", 600, lambda: _read_recent_items(uid))
+    planned_meal = _cached(f"planned_meal_{uid}",  60, lambda: _read_planned_meal(uid))
 
     cals    = sum(l["calories"] for l in today_logs)
     protein = sum(l["protein"]  for l in today_logs)
@@ -1367,6 +1514,7 @@ async def chat(
         user_id=uid,
         food_memory=food_memory,
         recent_items=recent_items,
+        planned_meal=planned_meal,
     )
 
     # Read image bytes if provided
@@ -1474,6 +1622,30 @@ async def chat(
                 )
                 if ok:
                     logged_items.append(entry)
+
+        # --- Meal reservation (block-out) handling ---
+        # 1) Auto-release an active reservation when the planned meal is logged,
+        #    so the block-out isn't double-counted against today's totals.
+        if logged_items:
+            active_res = _read_planned_meal(uid)
+            if active_res:
+                for e in logged_items:
+                    if e.get("consumes_reservation") or _looks_like_reserved(e, active_res):
+                        _clear_planned_meal(uid)
+                        break
+        # 2) Apply an explicit set/clear directive emitted by the model.
+        directive = _parse_reservation(full_response)
+        if directive:
+            action = str(directive.get("reservation_action", "set")).lower()
+            if action == "clear":
+                _clear_planned_meal(uid)
+            elif action == "set":
+                _write_planned_meal(
+                    str(directive.get("reserved_item", "Planned meal")),
+                    int(directive.get("reserved_calories", 0)),
+                    int(directive.get("reserved_protein", 0)),
+                    uid,
+                )
 
         yield f"data: {json.dumps({'done': True, 'logged': logged_items})}\n\n"
 

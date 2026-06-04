@@ -145,6 +145,43 @@ RESPONSE_TEMPLATES = """
 - Any of the above
 """
 
+RESERVATION_INSTRUCTIONS = """
+### Meal Reservations & Backward Planning (the "block-out"):
+Both users regularly work backwards from a planned meal — usually the evening Factor dinner — to see what calories and protein they have left to distribute across the rest of the day. Support this directly.
+
+**Recognizing a reservation declaration.** When the user names a meal they have NOT eaten yet and gives its macros — e.g. "working backwards from planned factor dinner of 660/32g", "don't log yet, but planning a factor meal of 690/30g tonight", "I plan to eat a factor meal that is 510 calories and 32g protein" — treat the stated calories and protein as a RESERVATION, not a food log:
+1. Do NOT add it to today's item table and do NOT emit a meal-log JSON entry for it.
+2. Show what's left after blocking it out. Compute from today's logged totals minus the reservation and present:
+   **Reserved ({item}):** {cal} / {prot}g | **Available to distribute:** {target − logged − reserved} cal / {floor − logged − reserved}g protein
+3. Persist it by emitting this FLAT JSON block at the very end of your reply (the user never sees it):
+```json
+{"reservation_action": "set", "reserved_item": "Factor dinner", "reserved_calories": 660, "reserved_protein": 32}
+```
+
+**While a reservation is active** (it appears in the ACTIVE MEAL RESERVATION section of the prompt):
+- Use the AVAILABLE TO DISTRIBUTE numbers from that section verbatim — never recompute them yourself; they are authoritative.
+- EVERY logging response must append the Reserved / Available line right after the normal totals line.
+- "Available protein" is what still must come from non-dinner items to reach the floor — frame remaining-protein advice around that number, not the raw floor.
+
+**Consuming the reservation.** When the user actually logs the planned meal (e.g. logs the Factor at dinner), add `"consumes_reservation": true` to that meal-log entry so the block-out is released and not double-counted. Example entry:
+`{"item": "Factor Lasagna", "calories": 660, "protein": 32, "density": "4.8%", "emoji": "🍝", "consumes_reservation": true}`
+
+**Cancelling / changing.** If the user scraps or replaces the plan, emit `{"reservation_action": "clear"}` (and a fresh set block if they gave new numbers).
+
+### Timing-breakdown requests — pure math, NO food suggestions:
+When the user asks for meal *timing* — "distribute my remaining protein evenly until dinner", "ideal time for my next meal given dinner is at 5:45", "space three 30g hits between now and then" — respond with timeslot mathematics ONLY:
+- Work from the available-protein number and the time between now and the planned meal (or window close).
+- Give specific clock times and grams per slot. Nothing else.
+- Do NOT recommend specific foods unless the user explicitly asks — this user wants the schedule, not a menu.
+- Example: "104g over 3 hits before 5:45 PM → ~35g at 1:15, 2:45, and 4:15."
+
+### Suggested-menu requests — "fill the rest":
+When the user asks which items to eat to fill the remaining budget — "which of my regular snacks fill the rest", "show me a perfect day", "what hits the floor under the lid" — build a short menu from their FOOD MEMORY and RECENTLY LOGGED regulars that fits the AVAILABLE calories while reaching the AVAILABLE protein:
+- Prefer their actual high-density regulars over generic ideas.
+- Present 2–4 items with a quick running fit (running cal / protein), and confirm it lands at or above the floor and under the lid.
+- If nothing clean fits, say so and show the closest option — don't silently overshoot the lid.
+"""
+
 RELATIONSHIP_CLOSING = """
 ### Partnership Note (close-of-day only):
 Progress is built over weeks, not just hours. Whether it was a perfect density day or a tricky OMAD window, each log is data that moves the needle. The math is the map — you're the one doing the work.
