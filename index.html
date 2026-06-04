@@ -1105,10 +1105,13 @@ function drawWeightSparkline(history) {
 }
 
 function mdToHtml(text) {
-  // Strip JSON meal-log block (internal logging artifact, never show to user)
-  text = text.replace(/```json\s*\[[\s\S]*?\]\s*```/g, '').trim();
-  // Strip flat JSON reservation/directive object block (also internal-only)
-  text = text.replace(/```json\s*\{[\s\S]*?\}\s*```/g, '').trim();
+  // Strip internal JSON directive blocks (meal-log array + reservation object),
+  // regardless of language tag — the model is inconsistent about labeling the
+  // fence (```json vs bare ``` vs ``` json). Match tag-agnostically; never shown.
+  text = text.replace(/```[\w]*\s*\[[\s\S]*?\]\s*```/g, '').trim();                       // meal-log array
+  text = text.replace(/```[^\n]*\n?[\s\S]*?reservation_action[\s\S]*?```/g, '').trim();   // fenced reservation (any tag)
+  // Belt-and-suspenders: an UNfenced reservation object on its own (no backticks)
+  text = text.replace(/^\s*\{[\s\S]*?reservation_action[\s\S]*?\}\s*$/gm, '').trim();
   // Generic code fences → inline block
   text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, '<code style="font-size:0.8rem;color:#a8d8a8;display:block;padding:4px 0;white-space:pre-wrap">$1</code>');
   // Headings
