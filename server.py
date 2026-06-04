@@ -471,6 +471,53 @@ def _read_food_memory(user_id: str = DEFAULT_USER) -> list[dict]:
         return []
 
 
+def _read_recent_items(user_id: str = DEFAULT_USER, days: int = 30) -> list[dict]:
+    """Return distinct foods logged in the last `days` days — any frequency —
+    most-recent macros winning per normalized name, newest first.
+
+    This is the retrieval safety net for low-frequency branded items that don't
+    make the top-75 FOOD MEMORY list (e.g. a candy bar logged once or twice).
+    Without it the coach has no way to honor "use the value from last time" and
+    re-asks for the label every time — the exact friction users complained about.
+    """
+    try:
+        sh = _get_sh(user_id)
+        ws = sh.sheet1
+        values = ws.get_all_values()
+        if len(values) <= 1:
+            return []
+        cutoff = (datetime.now(EASTERN) - timedelta(days=days)).date()
+        seen: dict = {}
+        for row in values[1:]:
+            if len(row) < 4:
+                continue
+            try:
+                ts = datetime.strptime(str(row[0]), "%Y-%m-%d %H:%M:%S")
+                if ts.date() < cutoff:
+                    continue
+                item = str(row[1]).strip()
+                if not item:
+                    continue
+                key = _normalize_food_name(item)
+                if not key:
+                    continue
+                entry = {
+                    "item":     item,
+                    "calories": int(float(row[2])) if row[2] else 0,
+                    "protein":  int(float(row[3])) if len(row) > 3 and row[3] else 0,
+                    "density":  str(row[4]).strip() if len(row) > 4 and row[4] else "0.0%",
+                    "key":      key,
+                }
+                if key not in seen or ts > seen[key]["ts"]:
+                    seen[key] = {"entry": entry, "ts": ts}
+            except Exception:
+                continue
+        ranked = sorted(seen.values(), key=lambda x: x["ts"], reverse=True)
+        return [r["entry"] for r in ranked]
+    except Exception:
+        return []
+
+
 def _read_wow(user_id: str = DEFAULT_USER) -> list[dict]:
     """Week-over-week averages."""
     try:
@@ -595,6 +642,7 @@ def _log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: s
         ws.append_row([ts, item, calories, protein, density, week_num, emoji, mode])
         _invalidate(f"today_logs_{user_id}")
         _invalidate(f"trailing_7_{user_id}")
+        _invalidate(f"recent_items_{user_id}")
         return True
     except Exception as e:
         log.error("Failed to log meal: %s", e)
@@ -655,6 +703,7 @@ def _replace_log_entry(
         ws.update(f"A{sheet_row}:H{sheet_row}", [[ts_str, new_item, calories, protein, density, week_num, emoji, mode]])
         _invalidate(f"today_logs_{user_id}")
         _invalidate(f"trailing_7_{user_id}")
+        _invalidate(f"recent_items_{user_id}")
         return old_entry
     except Exception as e:
         log.error("_replace_log_entry failed: %s", e)
@@ -728,6 +777,39 @@ Macro lookup priority: **label photo > user-stated macros > food memory > web es
 """
 
 
+def _build_recent_items_block(
+    recent_items: Optional[list],
+    food_memory: Optional[list],
+) -> str:
+    """Secondary reference of recently-logged items not already in FOOD MEMORY."""
+    if not recent_items:
+        return ""
+    fm_keys = set()
+    if food_memory:
+        for e in food_memory:
+            fm_keys.add(_normalize_food_name(e["item"]))
+    rows = []
+    for e in recent_items:
+        key = e.get("key") or _normalize_food_name(e["item"])
+        if key in fm_keys:
+            continue
+        rows.append(f"| {e['item']} | {e['calories']} | {e['protein']}g | {e['density']} |")
+        if len(rows) >= 60:
+            break
+    if not rows:
+        return ""
+    body = "\n".join(rows)
+    return f"""### RECENTLY LOGGED (last 30 days, any frequency — secondary macro reference):
+These are items you've logged recently that aren't frequent enough to reach the FOOD MEMORY list above. Use them to honor "use the value from last time" without re-asking for a label.
+- Same priority as FOOD MEMORY: label photo > user-stated macros > this list > web estimate.
+- If a branded item appears here, you HAVE logged it before — do NOT claim you have no record of it and do NOT ask for the label unless the user wants to update the macros.
+
+| Food | Cals | Protein | Density |
+|------|------|---------|---------|
+{body}
+"""
+
+
 def build_system_prompt(
     schedule: dict,
     goals: dict,
@@ -739,6 +821,7 @@ def build_system_prompt(
     mode: str = DEFAULT_MODE,
     user_id: str = DEFAULT_USER,
     food_memory: Optional[list] = None,
+    recent_items: Optional[list] = None,
 ) -> str:
     now = datetime.now(EASTERN)
     formatted_schedule = "\n".join([
@@ -926,6 +1009,7 @@ Core Logic:
 {weekly_context}
 
 {_build_food_memory_block(food_memory)}
+{_build_recent_items_block(recent_items, food_memory)}
 Fasting Protocol Strict Adherence:
 {formatted_schedule}
 
@@ -982,6 +1066,39 @@ JSON Output for Database Logging:
 # Gemini chat session builder
 # ---------------------------------------------------------------------------
 
+_TABLE_LINE_RE = re.compile(r"^\s*\|.*\|\s*$")
+
+_DAY_BOUNDARY_MARKER = (
+    "=== NEW DAY: {today} ===\n"
+    "Every item table shown above is from a PRIOR day and is historical "
+    "reference ONLY. Today's running tally starts EMPTY and is defined solely "
+    "by the TODAY'S EXPLICIT FOOD LOGS section of the system prompt. Do NOT "
+    "carry any item from the tables above into today's table. If today's logs "
+    "section is empty, today's table is empty."
+)
+
+
+def _strip_markdown_tables(text: str) -> str:
+    """Collapse markdown table blocks to a short placeholder.
+
+    Applied to PRIOR-day assistant turns before they enter the model's
+    history so the model cannot reconstruct yesterday's running tally into
+    today's table (the day-boundary bleed bug).  The conversational text
+    around the table is preserved.
+    """
+    out: list[str] = []
+    in_table = False
+    for line in text.split("\n"):
+        if _TABLE_LINE_RE.match(line):
+            if not in_table:
+                out.append("[earlier item table omitted — historical]")
+                in_table = True
+            continue
+        in_table = False
+        out.append(line)
+    return "\n".join(out)
+
+
 def _make_chat_session(model_id: str, system_prompt: str, history: list):
     client = _get_gemini()
     config_params = {"system_instruction": system_prompt}
@@ -991,16 +1108,44 @@ def _make_chat_session(model_id: str, system_prompt: str, history: list):
         except Exception:
             pass
     cfg = genai.types.GenerateContentConfig(**config_params)
-    # Convert history to genai Content objects
+    # Convert history to genai Content objects, with day-boundary handling.
+    # Prior-day assistant tables are stripped, and a one-time NEW DAY marker is
+    # prepended to the first of today's turns so the model never carries
+    # yesterday's running tally into today.
+    today_key = datetime.now(EASTERN).strftime("%Y-%m-%d")
     genai_history = []
+    seen_prior_day = False
+    boundary_done = False
     for msg in history:
+        ts = str(msg.get("timestamp", ""))
+        msg_date = ts[:10]
+        is_today = (msg_date == today_key)
         role = "model" if msg["role"] == "assistant" else msg["role"]
-        parts = []
+
+        texts = []
         for c in msg.get("content", []):
             if isinstance(c, str) and c.strip():
-                parts.append(genai.types.Part.from_text(text=c))
-        if parts:
-            genai_history.append(genai.types.Content(role=role, parts=parts))
+                txt = c
+                if not is_today and role == "model":
+                    txt = _strip_markdown_tables(txt)
+                texts.append(txt)
+
+        if not texts:
+            if not is_today and msg_date:
+                seen_prior_day = True
+            continue
+
+        # Prepend the day-boundary marker to the first of today's turns,
+        # but only if prior-day messages actually preceded it.
+        if is_today and seen_prior_day and not boundary_done:
+            texts[0] = _DAY_BOUNDARY_MARKER.format(today=today_key) + "\n\n" + texts[0]
+            boundary_done = True
+
+        parts = [genai.types.Part.from_text(text=t) for t in texts]
+        genai_history.append(genai.types.Content(role=role, parts=parts))
+
+        if not is_today and msg_date:
+            seen_prior_day = True
     return client.chats.create(model=model_id, config=cfg, history=genai_history)
 
 
@@ -1204,6 +1349,7 @@ async def chat(
     history      = _cached(f"chat_history_{uid}", 600, lambda: _read_persistent_chat(uid))
     trailing     = _cached(f"trailing_7_{uid}",   600, lambda: _read_trailing_7_days(uid))
     food_memory  = _cached(f"food_memory_{uid}",  600, lambda: _read_food_memory(uid))
+    recent_items = _cached(f"recent_items_{uid}", 600, lambda: _read_recent_items(uid))
 
     cals    = sum(l["calories"] for l in today_logs)
     protein = sum(l["protein"]  for l in today_logs)
@@ -1220,6 +1366,7 @@ async def chat(
         mode=active_mode,
         user_id=uid,
         food_memory=food_memory,
+        recent_items=recent_items,
     )
 
     # Read image bytes if provided
