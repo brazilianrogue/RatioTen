@@ -983,13 +983,17 @@ def build_system_prompt(
         r_cal  = int(planned_meal.get("calories", 0))
         r_prot = int(planned_meal.get("protein", 0))
         r_item = planned_meal.get("item", "Planned meal")
-        avail_cal  = max(0, goals['calories'] - today_stats['cals'] - r_cal)
+        # Calories stay SIGNED — a negative value means the user is already over
+        # budget before dinner, which is more useful than clamping to zero.
+        # Protein is clamped: you can never need negative grams to reach the floor.
+        avail_cal  = goals['calories'] - today_stats['cals'] - r_cal
         avail_prot = max(0, goals['protein'] - today_stats['protein'] - r_prot)
+        over_note = " (NEGATIVE = already over budget before the reserved meal — flag this)" if avail_cal < 0 else ""
         reservation_context = f"""
 ### ACTIVE MEAL RESERVATION (block-out — planned, NOT yet eaten; do NOT add it to today's item table):
 - **Reserved for later ("{r_item}"):** {r_cal} cal / {r_prot}g protein
 - **Logged so far:** {today_stats['cals']} cal / {today_stats['protein']}g
-- **AVAILABLE TO DISTRIBUTE (authoritative — use these numbers verbatim, do NOT recompute):** {avail_cal} cal / {avail_prot}g protein still to find from non-dinner items before the floor is met
+- **AVAILABLE TO DISTRIBUTE (authoritative — use these numbers verbatim, do NOT recompute):** {avail_cal} cal / {avail_prot}g protein still to find from non-dinner items before the floor is met{over_note}
 - While this reservation is active, EVERY logging response must append this line directly after the normal totals line:
   **Reserved ({r_item}):** {r_cal} / {r_prot}g | **Available to distribute:** {avail_cal} cal / {avail_prot}g
 """
@@ -1292,6 +1296,18 @@ def _make_chat_session(model_id: str, system_prompt: str, history: list):
 
         if not is_today and msg_date:
             seen_prior_day = True
+
+    # First message of a NEW day: history is entirely prior-day, so the marker
+    # was never attached to a today-turn above (there isn't one yet — the
+    # incoming message is sent separately).  Append it as a trailing turn so the
+    # model always sees the day boundary immediately before today's first log.
+    # (Consecutive user turns are already used in this app via the delete-logs
+    # system message, so this is safe.)
+    if seen_prior_day and not boundary_done:
+        genai_history.append(genai.types.Content(
+            role="user",
+            parts=[genai.types.Part.from_text(text=_DAY_BOUNDARY_MARKER.format(today=today_key))],
+        ))
     return client.chats.create(model=model_id, config=cfg, history=genai_history)
 
 
@@ -1311,6 +1327,20 @@ def _parse_meal_log(raw: str):
         return validated if validated else None
     except Exception:
         return None
+
+
+def _strip_directive_blocks(text: str) -> str:
+    """Remove internal JSON directive blocks (meal-log arrays, reservation
+    objects) from a response before it is stored/displayed.  Parsing happens on
+    the raw response first; this only affects what the user sees, so the JSON can
+    never leak into the chat regardless of how the model fenced it."""
+    # Fenced blocks, any language tag (```json, bare ```, ``` json, ```JSON)
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    # Unfenced meal-log array on its own line(s)
+    text = re.sub(r"(?m)^\s*\[\s*\{[\s\S]*?\}\s*\]\s*$", "", text)
+    # Unfenced reservation object on its own line(s)
+    text = re.sub(r"(?m)^\s*\{[\s\S]*?reservation_action[\s\S]*?\}\s*$", "", text)
+    return text.strip()
 
 
 def _normalize_response_headers(text: str) -> str:
@@ -1584,11 +1614,14 @@ async def chat(
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
                 return
 
-        # Parse meal log JSON from response
+        # Parse meal log JSON from response (uses the RAW response with directives)
         meal_log = _parse_meal_log(full_response)
 
-        # Log assistant response to sheet
-        _log_chat_to_sheet("assistant", full_response, uid)
+        # Log a display-clean copy to history — directive blocks (meal-log array,
+        # reservation object) are stripped so raw JSON never sits in the chat
+        # sheet or feeds back into a later turn's history. Parsing above and the
+        # reservation handling below still use the intact full_response.
+        _log_chat_to_sheet("assistant", _strip_directive_blocks(full_response), uid)
         _invalidate(f"chat_history_{uid}")
 
         # Write meal entries to sheet
