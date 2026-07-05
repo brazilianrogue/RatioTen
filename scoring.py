@@ -75,6 +75,43 @@ from sheets_client import open_sheet
 log = logging.getLogger(__name__)
 
 
+def compute_eating_hours(sched: dict) -> float:
+    """Return the eating-window length in hours for a single day's schedule entry.
+
+    ``sched`` is a ``{"start": "HH:MM"|None, "end": "HH:MM"|None}`` dict. A
+    missing start/end means a full fast/skip day (0.0 hours).
+    """
+    if not (sched.get("start") and sched.get("end")):
+        return 0.0
+    try:
+        start_t = datetime.strptime(sched["start"], "%H:%M")
+        end_t = datetime.strptime(sched["end"], "%H:%M")
+        hours = (end_t - start_t).total_seconds() / 3600.0
+        if hours < 0:
+            hours += 24.0  # cross-midnight window
+        return hours
+    except Exception:
+        return 8.0
+
+
+def compute_dynamic_protein_floor(eating_hours: float, target_protein: float) -> float:
+    """Scale the protein floor down for shorter eating windows (e.g. OMAD).
+
+    Full floor applies at/above ``PROTEIN_FLOOR_FULL_HOURS``; below
+    ``PROTEIN_FLOOR_MIN_HOURS`` the floor drops to ``PROTEIN_FLOOR_MIN_FRACTION``
+    of the goal (or 0 for a full fast). Linearly interpolated in between.
+    """
+    if eating_hours >= PROTEIN_FLOOR_FULL_HOURS:
+        return target_protein
+    if eating_hours <= PROTEIN_FLOOR_MIN_HOURS:
+        return 0.0 if eating_hours == 0.0 else target_protein * PROTEIN_FLOOR_MIN_FRACTION
+    fraction = PROTEIN_FLOOR_MIN_FRACTION + (
+        (eating_hours - PROTEIN_FLOOR_MIN_HOURS)
+        / (PROTEIN_FLOOR_FULL_HOURS - PROTEIN_FLOOR_MIN_HOURS)
+    ) * (1.0 - PROTEIN_FLOOR_MIN_FRACTION)
+    return target_protein * fraction
+
+
 def calculate_plan_effectiveness(
     calc_date: "datetime.date | None" = None,
     pre_sh: "gspread.Spreadsheet | None" = None,
@@ -116,7 +153,6 @@ def calculate_plan_effectiveness(
 
         is_bulk = mode == MODE_BULK
         target_cals = int(goals.get("calories", 1500))
-        target_cal_limit = target_cals + CALORIE_TARGET_BUFFER
         weight_delta = 0.0
 
         thirteen_days_ago = calc_date - timedelta(days=SCORE_WINDOW_DAYS - 1)
@@ -213,33 +249,22 @@ def calculate_plan_effectiveness(
                 sched = fasting_schedule.get(day_name, {"start": None, "end": None})
 
                 # Determine eating-window hours
-                if sched["start"] and sched["end"]:
-                    try:
-                        start_t = datetime.strptime(sched["start"], "%H:%M")
-                        end_t = datetime.strptime(sched["end"], "%H:%M")
-                        eating_hours = (end_t - start_t).total_seconds() / 3600.0
-                        if eating_hours < 0:
-                            eating_hours += 24.0  # cross-midnight window
-                    except Exception:
-                        eating_hours = 8.0
-                else:
-                    eating_hours = 0.0  # fast / skip day
+                eating_hours = compute_eating_hours(sched)
 
-                # Dynamic protein floor
+                # Dynamic protein floor — an explicit per-day override takes
+                # precedence over the eating-window formula.
                 target_protein = float(goals.get("protein", 150))
-                if eating_hours >= PROTEIN_FLOOR_FULL_HOURS:
-                    dynamic_floor = target_protein
-                elif eating_hours <= PROTEIN_FLOOR_MIN_HOURS:
-                    dynamic_floor = (
-                        0.0 if eating_hours == 0.0
-                        else target_protein * PROTEIN_FLOOR_MIN_FRACTION
-                    )
-                else:
-                    fraction = PROTEIN_FLOOR_MIN_FRACTION + (
-                        (eating_hours - PROTEIN_FLOOR_MIN_HOURS)
-                        / (PROTEIN_FLOOR_FULL_HOURS - PROTEIN_FLOOR_MIN_HOURS)
-                    ) * (1.0 - PROTEIN_FLOOR_MIN_FRACTION)
-                    dynamic_floor = target_protein * fraction
+                protein_override = sched.get("protein_override")
+                dynamic_floor = (
+                    float(protein_override) if protein_override is not None
+                    else compute_dynamic_protein_floor(eating_hours, target_protein)
+                )
+
+                # Calorie target — same override precedence, then the
+                # existing mode-dependent buffer math applies around it.
+                calorie_override = sched.get("calorie_override")
+                day_target_cals = float(calorie_override) if calorie_override is not None else target_cals
+                day_target_cal_limit = day_target_cals + CALORIE_TARGET_BUFFER
 
                 sum_cals += nums["cals"]
                 sum_prot += nums["prot"]
@@ -247,8 +272,8 @@ def calculate_plan_effectiveness(
                 # Calorie points (4 pts) — mode-dependent
                 if is_bulk:
                     # Bulk: reward hitting a surplus range (target-100 to target+300)
-                    cal_floor = target_cals - BULK_CAL_FLOOR_BUFFER
-                    cal_ceiling = target_cals + BULK_CAL_SURPLUS_MAX
+                    cal_floor = day_target_cals - BULK_CAL_FLOOR_BUFFER
+                    cal_ceiling = day_target_cals + BULK_CAL_SURPLUS_MAX
                     if cal_floor <= nums["cals"] <= cal_ceiling:
                         cal_pts = BULK_CAL_FULL_POINTS
                     elif nums["cals"] > cal_ceiling and nums["cals"] <= cal_ceiling + CALORIE_PARTIAL_BUFFER:
@@ -259,9 +284,9 @@ def calculate_plan_effectiveness(
                         cal_pts = 0.0
                 else:
                     # Cut: reward staying under the lid
-                    if nums["cals"] <= target_cal_limit:
+                    if nums["cals"] <= day_target_cal_limit:
                         cal_pts = CAL_FULL_POINTS
-                    elif nums["cals"] <= target_cal_limit + CALORIE_PARTIAL_BUFFER:
+                    elif nums["cals"] <= day_target_cal_limit + CALORIE_PARTIAL_BUFFER:
                         cal_pts = CAL_PARTIAL_POINTS
                     else:
                         cal_pts = 0.0

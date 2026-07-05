@@ -435,6 +435,15 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
   margin-top:12px; text-align:center; font-size:0.8rem;
   color:rgba(0,166,255,0.65); letter-spacing:0.03em;
 }
+.sched-overrides { margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.07); }
+.sched-time-field label .hint { text-transform:none; letter-spacing:normal; }
+.override-input {
+  flex:1; background:var(--card); border:1px solid rgba(255,255,255,0.1);
+  border-radius:8px; color:#fff; padding:8px 10px; font-size:0.95rem; outline:none;
+  font-family:var(--font); text-align:center;
+}
+.override-input:focus { border-color:rgba(255,255,255,0.25); }
+.override-input::placeholder { color:rgba(255,255,255,0.3); }
 /* ── Daily Targets stepper ────────────────────────────────────────────── */
 .goals-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px; }
 .goals-grid .form-group { margin-bottom:0; }
@@ -839,6 +848,7 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       </ul>
       <div class="eff-modal-formula">Adherence Score = (Average Daily Points ÷ 10) × 5.0</div>
       <p>If you log 14 days and hit your targets perfectly every day, you earn a perfect 5.0 for this section. Hit it half the time, you earn 2.5. This rewards consistency.</p>
+      <p style="color:var(--muted);font-size:0.85rem">Prefer an exact number over the formula's guess? Each day in the Fasting Schedule settings can have its own Protein Floor and Calorie Target override — the score (and the AI coach) will use it instead of the dynamic calculation.</p>
 
       <h4>2. Weight Shift Focus <span style="font-weight:400;color:var(--muted)">(Up to 5.0 Points)</span></h4>
       <p>Even with perfect adherence, your body's response is the ultimate truth. The second half looks at actual weight movement over the 14-day window. To smooth out daily fluctuations, the system compares your lowest weight from the first 7 days to your lowest weight from the past 7 days:</p>
@@ -2308,18 +2318,43 @@ function windowDur(start, end) {
   return m === 0 ? `${h}h window` : `${h}h ${m}m window`;
 }
 
+// Mirrors constants.PROTEIN_FLOOR_FULL_HOURS / MIN_HOURS / MIN_FRACTION so the
+// Settings UI shows the same default the coach and Plan Effectiveness score
+// will actually use, before the user decides whether to override it.
+const PROTEIN_FLOOR_FULL_HOURS = 6.0;
+const PROTEIN_FLOOR_MIN_HOURS  = 1.0;
+const PROTEIN_FLOOR_MIN_FRACTION = 0.30;
+
+function windowHours(start, end) {
+  if (!start || !end) return 0;
+  const mins = timeToMins(end) - timeToMins(start);
+  return Math.max(0, mins) / 60.0;
+}
+function computeDynamicFloorPreview(hours, targetProtein) {
+  if (hours <= 0) return 0;
+  if (hours >= PROTEIN_FLOOR_FULL_HOURS) return targetProtein;
+  if (hours <= PROTEIN_FLOOR_MIN_HOURS) return targetProtein * PROTEIN_FLOOR_MIN_FRACTION;
+  const fraction = PROTEIN_FLOOR_MIN_FRACTION + ((hours - PROTEIN_FLOOR_MIN_HOURS) /
+    (PROTEIN_FLOOR_FULL_HOURS - PROTEIN_FLOOR_MIN_HOURS)) * (1.0 - PROTEIN_FLOOR_MIN_FRACTION);
+  return targetProtein * fraction;
+}
+
 function buildSchedForm(sched) {
   DAYS.forEach(day => {
     const d = sched[day] || { start: null, end: null };
+    const overrides = {
+      protein_override: d.protein_override ?? null,
+      calorie_override: d.calorie_override ?? null,
+    };
     if (!d.start) {
-      scheduleData[day] = { start: null, end: null };
+      scheduleData[day] = { start: null, end: null, ...overrides };
     } else {
       // Normalize to whole hours, enforce ≥1h gap
       let sh = timeToHour(d.start, false) || 12;
       let eh = timeToHour(d.end,   true)  || 18;
       sh = Math.max(1,  Math.min(23, sh));
       eh = Math.max(sh + 1, Math.min(24, eh));
-      scheduleData[day] = { start: hourToTime(sh), end: hourToTime(eh) };
+      scheduleData[day] = { start: hourToTime(sh), end: hourToTime(eh), ...overrides };
     }
   });
   renderSchedWidget();
@@ -2389,6 +2424,29 @@ function renderSchedWidget() {
         </div>
         ${dur ? `<div class="sched-window-dur">${dur}</div>` : ''}
       </div>
+      ${(() => {
+        const targetProt = parseFloat(document.getElementById('goal-prot')?.value) || 150;
+        const targetCals = parseFloat(document.getElementById('goal-cals')?.value) || 1500;
+        const hrs = isFast ? 0 : windowHours(d.start, d.end);
+        const suggestedFloor = Math.round(computeDynamicFloorPreview(hrs, targetProt));
+        return `
+      <div class="sched-overrides">
+        <div class="sched-time-row">
+          <div class="sched-time-field">
+            <label>Protein Floor Override <span class="hint">(default: ~${suggestedFloor}g)</span></label>
+            <input type="number" class="override-input" placeholder="${suggestedFloor}g"
+                   value="${d.protein_override ?? ''}"
+                   oninput="updateSchedOverride('${schedSelectedDay}','protein_override',this.value)">
+          </div>
+          <div class="sched-time-field">
+            <label>Calorie Target Override <span class="hint">(default: ${targetCals})</span></label>
+            <input type="number" class="override-input" placeholder="${targetCals}"
+                   value="${d.calorie_override ?? ''}"
+                   oninput="updateSchedOverride('${schedSelectedDay}','calorie_override',this.value)">
+          </div>
+        </div>
+      </div>`;
+      })()}
     </div>`;
   }
 
@@ -2402,9 +2460,10 @@ function selectSchedDay(day) {
 }
 
 function toggleSchedDay(day, hasWindow) {
+  const { protein_override, calorie_override } = scheduleData[day];
   scheduleData[day] = hasWindow
-    ? { start: '12:00', end: '18:00' }
-    : { start: null, end: null };
+    ? { start: '12:00', end: '18:00', protein_override, calorie_override }
+    : { start: null, end: null, protein_override, calorie_override };
   renderSchedWidget();
 }
 
@@ -2412,14 +2471,19 @@ function updateSchedHour(day, field, h) {
   const d      = scheduleData[day];
   const startH = timeToHour(d.start, false) || 12;
   const endH   = timeToHour(d.end,   true)  || 18;
+  const overrides = { protein_override: d.protein_override, calorie_override: d.calorie_override };
   if (field === 'start') {
     // Auto-bump end if it's no longer ≥1h ahead
     const newEnd = endH <= h ? h + 1 : endH;
-    scheduleData[day] = { start: hourToTime(h), end: hourToTime(Math.min(24, newEnd)) };
+    scheduleData[day] = { start: hourToTime(h), end: hourToTime(Math.min(24, newEnd)), ...overrides };
   } else {
-    scheduleData[day] = { start: d.start, end: hourToTime(h) };
+    scheduleData[day] = { start: d.start, end: hourToTime(h), ...overrides };
   }
   renderSchedWidget();
+}
+
+function updateSchedOverride(day, field, value) {
+  scheduleData[day][field] = value === '' ? null : Number(value);
 }
 
 async function saveSchedule() {

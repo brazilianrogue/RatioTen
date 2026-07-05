@@ -41,7 +41,12 @@ from constants import (
     WS_CUSTOM_INSTRUCTIONS,
     WS_PLANNED_MEAL,
 )
-from scoring import calculate_plan_effectiveness, sync_plan_effectiveness_logs
+from scoring import (
+    calculate_plan_effectiveness,
+    compute_dynamic_protein_floor,
+    compute_eating_hours,
+    sync_plan_effectiveness_logs,
+)
 
 log = logging.getLogger(__name__)
 
@@ -106,16 +111,30 @@ def _get_gemini():
 # Sheet helpers  (ported 1-to-1 from app.py, st.cache_data → _cached)
 # ---------------------------------------------------------------------------
 
+def _default_day(start: str | None, end: str | None) -> dict:
+    return {"start": start, "end": end, "protein_override": None, "calorie_override": None}
+
+
 DEFAULT_SCHEDULE = {
-    "Monday":    {"start": None,    "end": None},
-    "Tuesday":   {"start": "12:00", "end": "18:00"},
-    "Wednesday": {"start": "12:00", "end": "18:00"},
-    "Thursday":  {"start": "12:00", "end": "18:00"},
-    "Friday":    {"start": "18:00", "end": "19:00"},
-    "Saturday":  {"start": "12:00", "end": "18:00"},
-    "Sunday":    {"start": "12:00", "end": "18:00"},
+    "Monday":    _default_day(None,    None),
+    "Tuesday":   _default_day("12:00", "18:00"),
+    "Wednesday": _default_day("12:00", "18:00"),
+    "Thursday":  _default_day("12:00", "18:00"),
+    "Friday":    _default_day("18:00", "19:00"),
+    "Saturday":  _default_day("12:00", "18:00"),
+    "Sunday":    _default_day("12:00", "18:00"),
 }
 DEFAULT_GOALS = {"calories": 1500, "protein": 150, "mode": DEFAULT_MODE}
+
+
+def _parse_override(raw) -> float | None:
+    s = str(raw).strip()
+    if not s or s.lower() in ["skip", "none"]:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 def _read_fasting_schedule(user_id: str = DEFAULT_USER) -> dict:
@@ -124,10 +143,10 @@ def _read_fasting_schedule(user_id: str = DEFAULT_USER) -> dict:
         try:
             ws = sh.worksheet(WS_FASTING_SCHEDULE)
         except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(title=WS_FASTING_SCHEDULE, rows="10", cols="3")
-            ws.append_row(["DayOfWeek", "WindowStart", "WindowEnd"])
+            ws = sh.add_worksheet(title=WS_FASTING_SCHEDULE, rows="10", cols="5")
+            ws.append_row(["DayOfWeek", "WindowStart", "WindowEnd", "ProteinFloorOverride", "CalorieLidOverride"])
             for day, t in DEFAULT_SCHEDULE.items():
-                ws.append_row([day, t["start"] or "Skip", t["end"] or "Skip"])
+                ws.append_row([day, t["start"] or "Skip", t["end"] or "Skip", "", ""])
             return DEFAULT_SCHEDULE
         data = ws.get_all_records()
         if not data:
@@ -141,7 +160,12 @@ def _read_fasting_schedule(user_id: str = DEFAULT_USER) -> dict:
                 start = None
             if end.lower() in ["skip", "none", ""]:
                 end = None
-            sched[day] = {"start": start, "end": end}
+            sched[day] = {
+                "start": start,
+                "end": end,
+                "protein_override": _parse_override(row.get("ProteinFloorOverride", "")),
+                "calorie_override": _parse_override(row.get("CalorieLidOverride", "")),
+            }
         return sched
     except Exception:
         return DEFAULT_SCHEDULE
@@ -957,6 +981,38 @@ def build_system_prompt(
         for day, t in schedule.items()
     ])
 
+    # -----------------------------------------------------------------------
+    # Today's adjusted targets — mirrors scoring.calculate_plan_effectiveness
+    # so the coach and the Plan Effectiveness score never disagree. A short
+    # eating window (e.g. OMAD) scales the protein floor down via the same
+    # formula; an explicit per-day override (set in Settings) takes precedence
+    # over the formula for either the floor or the calorie target.
+    # -----------------------------------------------------------------------
+    today_name = now.strftime("%A")
+    today_sched = schedule.get(today_name, {"start": None, "end": None})
+    eating_hours_today = compute_eating_hours(today_sched)
+    protein_override = today_sched.get("protein_override")
+    calorie_override = today_sched.get("calorie_override")
+    todays_protein_floor = int(round(
+        float(protein_override) if protein_override is not None
+        else compute_dynamic_protein_floor(eating_hours_today, goals["protein"])
+    ))
+    todays_calorie_target = int(round(
+        float(calorie_override) if calorie_override is not None else goals["calories"]
+    ))
+    window_desc = (
+        f"{eating_hours_today:g}h window ({today_sched['start']}–{today_sched['end']})"
+        if today_sched.get("start") and today_sched.get("end")
+        else "Full Fast / Skip Day"
+    )
+    todays_targets_context = f"""
+### TODAY'S EATING WINDOW & ADJUSTED TARGETS (use these, not the baseline goal, in all coaching today):
+- **Window:** {window_desc}
+- **Adjusted Protein Floor:** {todays_protein_floor}g {"(explicit override)" if protein_override is not None else "(scaled for today's window)"}
+- **Calorie Target:** {todays_calorie_target} {"(explicit override)" if calorie_override is not None else ""}
+- These numbers already account for a shorter eating window — do NOT reason about the baseline goal (e.g. worrying it's "hard to hit" the full number) when the adjusted numbers are what actually apply today.
+"""
+
     time_awareness = f"""
 ### CURRENT TIME AWARENESS:
 - **Today is:** {now.strftime("%A")}, {now.strftime("%Y-%m-%d")}
@@ -971,11 +1027,11 @@ def build_system_prompt(
     if today_stats:
         stats_context = f"""
 ### CURRENT DAY SITUATION REPORT:
-- **Calories Ingested:** {today_stats['cals']} / {goals['calories']} ({cal_label})
-- **Protein Ingested:** {today_stats['protein']}g / {goals['protein']}g (Floor)
+- **Calories Ingested:** {today_stats['cals']} / {todays_calorie_target} ({cal_label})
+- **Protein Ingested:** {today_stats['protein']}g / {todays_protein_floor}g (Floor)
 - **Current Density:** {today_stats['density']}
-- **{cal_remaining_label}:** {max(0, goals['calories'] - today_stats['cals'])}
-- **Remaining Protein Needed:** {max(0, goals['protein'] - today_stats['protein'])}g
+- **{cal_remaining_label}:** {max(0, todays_calorie_target - today_stats['cals'])}
+- **Remaining Protein Needed:** {max(0, todays_protein_floor - today_stats['protein'])}g
 """
 
     reservation_context = ""
@@ -986,8 +1042,8 @@ def build_system_prompt(
         # Calories stay SIGNED — a negative value means the user is already over
         # budget before dinner, which is more useful than clamping to zero.
         # Protein is clamped: you can never need negative grams to reach the floor.
-        avail_cal  = goals['calories'] - today_stats['cals'] - r_cal
-        avail_prot = max(0, goals['protein'] - today_stats['protein'] - r_prot)
+        avail_cal  = todays_calorie_target - today_stats['cals'] - r_cal
+        avail_prot = max(0, todays_protein_floor - today_stats['protein'] - r_prot)
         over_note = " (NEGATIVE = already over budget before the reserved meal — flag this)" if avail_cal < 0 else ""
         reservation_context = f"""
 ### ACTIVE MEAL RESERVATION (block-out — planned, NOT yet eaten; do NOT add it to today's item table):
@@ -1018,13 +1074,13 @@ DO NOT pull food items from previous days' conversation history into today's tab
 
     coaching_mode = ""
     if today_stats:
-        protein_done  = today_stats['protein'] >= goals['protein']
-        cals_near_lid = today_stats['cals'] >= int(goals['calories'] * 0.88)
+        protein_done  = today_stats['protein'] >= todays_protein_floor
+        cals_near_lid = today_stats['cals'] >= int(todays_calorie_target * 0.88)
         is_evening    = now.hour >= 18
 
         if is_bulk:
             # Bulk mode coaching modes
-            cals_under_target = today_stats['cals'] < int(goals['calories'] * 0.70)
+            cals_under_target = today_stats['cals'] < int(todays_calorie_target * 0.70)
             if protein_done and is_evening:
                 mode_text = (
                     "CLOSE-OF-DAY MODE (RECOMP): Protein floor is ACHIEVED and it is evening. "
@@ -1100,13 +1156,13 @@ DO NOT pull food items from previous days' conversation history into today's tab
         _gap_met = (_now_naive - _last_ts).total_seconds() >= 5400  # 90 min
 
     # Floor status for the fallback path
-    _floor_hit = today_stats is not None and today_stats["protein"] >= goals["protein"]
+    _floor_hit = today_stats is not None and today_stats["protein"] >= todays_protein_floor
     if today_stats:
-        _cals_left = max(0, goals["calories"] - today_stats["cals"])
-        _prot_left = max(0, goals["protein"] - today_stats["protein"])
+        _cals_left = max(0, todays_calorie_target - today_stats["cals"])
+        _prot_left = max(0, todays_protein_floor - today_stats["protein"])
     else:
-        _cals_left = goals["calories"]
-        _prot_left = goals["protein"]
+        _cals_left = todays_calorie_target
+        _prot_left = todays_protein_floor
     # Floor is "unreachable" if hitting it would cost more calories than remain
     # (using ~4 cal/g as the minimum possible protein calorie cost)
     _floor_unreachable = _prot_left > 0 and (_prot_left * 4) > _cals_left
@@ -1147,7 +1203,7 @@ You are the RatioTen Assistant — a knowledgeable, friendly nutrition coach. Yo
 {persona.BULK_MODE_CONTEXT if is_bulk else ""}
 
 {time_awareness}
-
+{todays_targets_context}
 Core Logic:
 - Primary Quality Metric: Protein Density (Goal: 10.0%).
 - Calculated explicitly as: (Protein in grams / Total Calories).
@@ -1178,9 +1234,9 @@ Formatting Constraints (Mobile Optimized):
 - **Source of Truth for Item Table:** The "TODAY'S EXPLICIT FOOD LOGS" section above is the authoritative record of everything logged today. If that section says "Nothing logged today yet," then today is empty — DO NOT pull items from prior days' conversation history into today's table. When food IS being logged, include ALL items from that injected list PLUS any new item(s) from the current message.
 
 Response Format After the Item Table:
-- Goals: {"~" if is_bulk else "<="} {goals['calories']} cal{"" if is_bulk else ""} | >= {goals['protein']}g protein | >= 10.0% density.
+- Goals: {"~" if is_bulk else "<="} {todays_calorie_target} cal{"" if is_bulk else ""} | >= {todays_protein_floor}g protein | >= 10.0% density.
 - After the item table, output ONE inline totals line in exactly this format:
-  **Cals:** X / {goals['calories']} | **Protein:** Xg / {goals['protein']}g | **Density:** X.X%
+  **Cals:** X / {todays_calorie_target} | **Protein:** Xg / {todays_protein_floor}g | **Density:** X.X%
 - Then 1–3 sentences of natural conversational response. No headers. No bullet lists. No sub-sections.
 - DO NOT reproduce the situation report stats block in your response. The inline totals line is sufficient.
 - See the RESPONSE TEMPLATES section for the expected format by coaching mode.
@@ -1737,13 +1793,19 @@ async def save_schedule(body: dict, user_id: str = Query(DEFAULT_USER)):
         try:
             ws = sh.worksheet(WS_FASTING_SCHEDULE)
         except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(title=WS_FASTING_SCHEDULE, rows="10", cols="3")
+            ws = sh.add_worksheet(title=WS_FASTING_SCHEDULE, rows="10", cols="5")
         ws.clear()
-        ws.append_row(["DayOfWeek", "WindowStart", "WindowEnd"])
+        ws.append_row(["DayOfWeek", "WindowStart", "WindowEnd", "ProteinFloorOverride", "CalorieLidOverride"])
         for day, times in body.items():
-            start_val = times.get("start") or "Skip"
-            end_val   = times.get("end")   or "Skip"
-            ws.append_row([day, start_val, end_val])
+            start_val   = times.get("start") or "Skip"
+            end_val     = times.get("end")   or "Skip"
+            protein_val = times.get("protein_override")
+            calorie_val = times.get("calorie_override")
+            ws.append_row([
+                day, start_val, end_val,
+                "" if protein_val in (None, "") else protein_val,
+                "" if calorie_val in (None, "") else calorie_val,
+            ])
         _invalidate(f"schedule_{uid}")
         return {"ok": True}
     except Exception as e:

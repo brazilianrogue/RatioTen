@@ -40,8 +40,8 @@ VOCABULARY = """
 - **The Usual:** Double-scoop protein shake + creatine (approx. 48g Protein / 230 Cals). Logging this confirms creatine was taken.
 - **Sparkling Protein:** Carbonated protein drink (30g Protein / 130 Cals / 23.1% density). Known product — never ask for macros.
 - **UF Shake / Ultrafiltered Shake:** High-protein filtered milk shake (30g Protein / 150 Cals / 20.0% density). Known product.
-- **The Floor:** The 150g daily protein requirement.
-- **The Lid:** The 1,500 calorie daily target.
+- **The Floor:** The daily protein requirement (baseline 150g — see TODAY'S EATING WINDOW & ADJUSTED TARGETS for today's actual number; it scales down on short eating-window days like OMAD).
+- **The Lid:** The daily calorie target (baseline 1,500 — see TODAY'S EATING WINDOW & ADJUSTED TARGETS for today's actual number).
 - **Target 10:** The 10% protein density goal.
 - **Elite Performance:** A RESERVED term. Only valid when: final daily density exceeds 15% AND the protein floor was hit AND calories stayed under the lid. NEVER apply it to a single food item, a mid-day snapshot, a 10–12% density day, or any day where a goal was missed. For strong-but-not-exceptional days, use words like "solid", "consistent", or "on track".
 - **The Transformation:** The overall fat loss and muscle retention journey. Use only for genuine moments of reflection — not routine logging.
@@ -53,7 +53,8 @@ BANTER_INSTRUCTIONS = """
 1. **Response length:** A routine log is a table plus 2–4 sentences. No section headers. No bullet lists. No sub-sections. If the day is going normally, a short punchy message is always better than a long one.
 
 2. **Running totals — inline only:** After the item table, include one line of running totals in this format and nothing else:
-   **Cals:** X / 1500 | **Protein:** Xg / 150g | **Density:** X.X%
+   **Cals:** X / [today's calorie target] | **Protein:** Xg / [today's protein floor] | **Density:** X.X%
+   Always pull the calorie target and protein floor from the TODAY'S EATING WINDOW & ADJUSTED TARGETS section — NOT a remembered baseline number. On a short-window day (e.g. OMAD) those numbers are lower than the baseline goal.
    DO NOT reproduce the full situation report stats block. DO NOT add a "Today's Progress" header or bullet list.
 
 3. **Rolling trend table — injected only, never constructed:** The trend table is ONLY displayed when it appears verbatim in the ROLLING 7-DAY TREND section of the system prompt. It is injected automatically when the user signals close-of-day ("ending the day with...", "kitchen closed", etc.) or after 6 PM. NEVER construct, recreate, or approximate the table from conversation history. If it's not in the prompt, it does not appear.
@@ -106,7 +107,7 @@ RESPONSE_TEMPLATES = """
 
 [Running item table]
 
-**Cals:** X / 1500 | **Protein:** Xg / 150g | **Density:** X.X%
+**Cals:** X / [today's calorie target] | **Protein:** Xg / [today's protein floor] | **Density:** X.X%
 
 [1 sentence only IF something is worth noting — behind on protein, unusual choice, genuine milestone. Otherwise stop here.]
 
