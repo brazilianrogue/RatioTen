@@ -1122,6 +1122,9 @@ function mdToHtml(text) {
   text = text.replace(/```[^\n]*\n?[\s\S]*?reservation_action[\s\S]*?```/g, '').trim();   // fenced reservation (any tag)
   // Belt-and-suspenders: an UNfenced reservation object on its own (no backticks)
   text = text.replace(/^\s*\{[\s\S]*?reservation_action[\s\S]*?\}\s*$/gm, '').trim();
+  // Workout directive object, fenced or bare
+  text = text.replace(/```[^\n]*\n?[\s\S]*?workout_action[\s\S]*?```/g, '').trim();
+  text = text.replace(/^\s*\{[^\n]*"workout_action"[\s\S]*?\}\s*$/gm, '').trim();
   // Generic code fences → inline block
   text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, '<code style="font-size:0.8rem;color:#a8d8a8;display:block;padding:4px 0;white-space:pre-wrap">$1</code>');
   // Headings

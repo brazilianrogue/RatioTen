@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from google import genai
 
 import persona
+import workouts
 from constants import (
     DEFAULT_MODE,
     DEFAULT_USER,
@@ -40,6 +41,10 @@ from constants import (
     WS_USER_GOALS,
     WS_CUSTOM_INSTRUCTIONS,
     WS_PLANNED_MEAL,
+    WS_WORKOUT_LOGS,
+    WS_EXERCISE_ALIASES,
+    WORKOUT_HEADERS,
+    ALIAS_HEADERS,
 )
 from scoring import (
     calculate_plan_effectiveness,
@@ -824,6 +829,112 @@ def _clear_planned_meal(user_id: str = DEFAULT_USER) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Workout tracking (Workout_Logs + Exercise_Aliases tabs; logic in workouts.py)
+# ---------------------------------------------------------------------------
+
+def _workout_ws(sh: gspread.Spreadsheet, title: str, headers: list[str], create: bool):
+    try:
+        return sh.worksheet(title)
+    except gspread.WorksheetNotFound:
+        if not create:
+            return None
+        ws = sh.add_worksheet(title=title, rows="1000", cols=str(len(headers)))
+        ws.append_row(headers)
+        return ws
+
+
+def _read_workout_values(user_id: str = DEFAULT_USER) -> list[list]:
+    try:
+        ws = _workout_ws(_get_sh(user_id), WS_WORKOUT_LOGS, WORKOUT_HEADERS, create=False)
+        return ws.get_all_values() if ws else []
+    except Exception as e:
+        log.error("_read_workout_values failed: %s", e)
+        return []
+
+
+def _read_exercise_aliases(user_id: str = DEFAULT_USER) -> dict[str, str]:
+    try:
+        ws = _workout_ws(_get_sh(user_id), WS_EXERCISE_ALIASES, ALIAS_HEADERS, create=False)
+        return workouts.parse_aliases(ws.get_all_values()) if ws else {}
+    except Exception as e:
+        log.error("_read_exercise_aliases failed: %s", e)
+        return {}
+
+
+def _apply_workout_directive(directive: dict, user_id: str = DEFAULT_USER) -> Optional[dict]:
+    """Write a parsed workout directive to the sheet.
+
+    Returns {"action", "entries": [{"exercise","raw","sets"}]} on success, else None.
+    Reads fresh (uncached) so session assignment and replace/delete target the
+    true last rows.
+    """
+    try:
+        sh = _get_sh(user_id)
+        ws = _workout_ws(sh, WS_WORKOUT_LOGS, WORKOUT_HEADERS, create=True)
+        rows = workouts.parse_rows(ws.get_all_values())
+        aliases = _read_exercise_aliases(user_id)
+        now = datetime.now(EASTERN).replace(tzinfo=None)
+        action = directive["action"]
+
+        ts = now.strftime(workouts.TS_FMT)
+        entry_id = workouts.new_entry_id(now)
+        last = max(rows, key=lambda r: r["row"]) if rows else None
+        session = workouts.assign_session(last["ts"] if last else None,
+                                          last["session"] if last else "", now)
+
+        if action in ("replace_last", "delete_last"):
+            if not last:
+                return None
+            target = [r for r in rows if r["entry"] == last["entry"]] if last["entry"] else [last]
+            # Delete bottom-up so earlier row numbers stay valid
+            for r in sorted(target, key=lambda r: r["row"], reverse=True):
+                ws.delete_rows(r["row"])
+            # A replacement keeps the original entry's timestamp/session/id
+            ts, session, entry_id = (target[0]["ts"].strftime(workouts.TS_FMT),
+                                     target[0]["session"], target[0]["entry"] or entry_id)
+            if action == "delete_last":
+                _invalidate(f"workout_values_{user_id}")
+                return {"action": action,
+                        "entries": [{"exercise": workouts.resolve_exercise(target[0], aliases),
+                                     "raw": target[0]["raw"], "sets": sum(r["sets"] for r in target)}]}
+
+        sheet_rows, summary = workouts.build_rows(directive["entries"], aliases, ts, session, entry_id)
+        if not sheet_rows:
+            return None
+        ws.append_rows(sheet_rows)
+
+        new_aliases = workouts.new_alias_rows(summary, aliases, now.strftime("%Y-%m-%d"))
+        if new_aliases:
+            aws = _workout_ws(sh, WS_EXERCISE_ALIASES, ALIAS_HEADERS, create=True)
+            aws.append_rows(new_aliases)
+            _invalidate(f"exercise_aliases_{user_id}")
+        _invalidate(f"workout_values_{user_id}")
+        return {"action": action, "entries": summary}
+    except Exception as e:
+        log.error("_apply_workout_directive failed: %s", e)
+        return None
+
+
+def _is_workout_turn(text: str, history: list, aliases: dict[str, str]) -> bool:
+    """Workout intent for this message — or a short follow-up to a recent
+    workout message (name confirmation, "fix that", "scratch that")."""
+    if workouts.looks_like_workout(text, set(aliases)):
+        return True
+    if len(text) > 80:
+        return False
+    prev = next((h for h in reversed(history) if h.get("role") == "user"), None)
+    if not prev:
+        return False
+    try:
+        prev_ts = datetime.strptime(prev.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
+        if datetime.now(EASTERN).replace(tzinfo=None) - prev_ts > timedelta(hours=3):
+            return False
+    except ValueError:
+        return False
+    return workouts.looks_like_workout(" ".join(prev.get("content", [])), set(aliases))
+
+
 def _parse_reservation(raw: str) -> Optional[dict]:
     """Extract a flat reservation directive object from the model response.
 
@@ -1396,6 +1507,8 @@ def _strip_directive_blocks(text: str) -> str:
     text = re.sub(r"(?m)^\s*\[\s*\{[\s\S]*?\}\s*\]\s*$", "", text)
     # Unfenced reservation object on its own line(s)
     text = re.sub(r"(?m)^\s*\{[\s\S]*?reservation_action[\s\S]*?\}\s*$", "", text)
+    # Unfenced workout directive object
+    text = re.sub(r"(?m)^\s*\{[^\n]*\"workout_action\"[\s\S]*?\}\s*$", "", text)
     return text.strip()
 
 
@@ -1603,6 +1716,18 @@ async def chat(
         planned_meal=planned_meal,
     )
 
+    # Workout mode: append the workout section + server-computed history
+    # snapshot only when this turn looks workout-related.
+    aliases = _cached(f"exercise_aliases_{uid}", 600, lambda: _read_exercise_aliases(uid))
+    if _is_workout_turn(text, history, aliases):
+        w_values = _cached(f"workout_values_{uid}", 600, lambda: _read_workout_values(uid))
+        w_rows = workouts.parse_rows(w_values) if w_values else []
+        w_now = datetime.now(EASTERN).replace(tzinfo=None)
+        system_prompt += workouts.build_workout_prompt(
+            workouts.build_snapshot(w_rows, aliases, w_now),
+            sorted(workouts.canonical_names(w_rows, aliases)),
+        )
+
     # Read image bytes if provided
     image_bytes = None
     if image and image.filename:
@@ -1672,6 +1797,11 @@ async def chat(
 
         # Parse meal log JSON from response (uses the RAW response with directives)
         meal_log = _parse_meal_log(full_response)
+        workout_directive = workouts.parse_workout_directive(full_response)
+        if meal_log and workout_directive:
+            # One type per message: a mixed food+exercise turn logs nothing.
+            log.warning("chat: model emitted both food and workout directives — logging neither")
+            meal_log, workout_directive = None, None
 
         # Log a display-clean copy to history — directive blocks (meal-log array,
         # reservation object) are stripped so raw JSON never sits in the chat
@@ -1736,7 +1866,12 @@ async def chat(
                     uid,
                 )
 
-        yield f"data: {json.dumps({'done': True, 'logged': logged_items})}\n\n"
+        # --- Workout log / correction / deletion ---
+        workout_result = None
+        if workout_directive:
+            workout_result = _apply_workout_directive(workout_directive, uid)
+
+        yield f"data: {json.dumps({'done': True, 'logged': logged_items, 'workout': workout_result})}\n\n"
 
     return StreamingResponse(
         generate(),

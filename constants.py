@@ -136,3 +136,14 @@ WS_USER_GOALS = "User_Goals"
 WS_CUSTOM_INSTRUCTIONS = "Custom_Instructions"
 WS_PLAN_EFFECTIVENESS = "Plan_Effectiveness_Logs"
 WS_PLANNED_MEAL = "Planned_Meal"
+WS_WORKOUT_LOGS = "Workout_Logs"
+WS_EXERCISE_ALIASES = "Exercise_Aliases"
+
+# ---------------------------------------------------------------------------
+# Workout tracking
+# ---------------------------------------------------------------------------
+WORKOUT_HEADERS = ["Timestamp", "Session ID", "Entry ID", "Exercise", "Raw Input",
+                   "Weight (lb)", "Reps", "Duration (s)", "Sets"]
+ALIAS_HEADERS = ["Alias", "Exercise", "Added"]
+SESSION_GAP_HOURS = 3          # a gap longer than this between sets starts a new session
+WORKING_WEIGHT_SESSIONS = 3    # working weight = avg top set over this many recent sessions

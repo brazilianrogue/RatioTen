@@ -1,0 +1,266 @@
+from datetime import datetime, timedelta
+
+import pytest
+
+import workouts as w
+from constants import WORKOUT_HEADERS
+
+NOW = datetime(2026, 10, 2, 18, 0, 0)
+
+
+def sheet(rows):
+    """Build get_all_values()-style data from (ts, session, entry, exercise, raw, wt, reps, dur, sets)."""
+    return [WORKOUT_HEADERS] + [[str(c) for c in r] for r in rows]
+
+
+def ts(days_ago=0, hour=7, minute=0):
+    return (NOW - timedelta(days=days_ago)).replace(hour=hour, minute=minute).strftime(w.TS_FMT)
+
+
+# ---------------------------------------------------------------------------
+# alias_key
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,key", [
+    ("lat pulldowns, 100 x 8 x 3", "lat pulldowns"),
+    ("Lat Pulldowns 100x8x3", "lat pulldowns"),
+    ("pushups 80", "pushups"),
+    ("floor pushups 20 x 4", "floor pushups"),
+    ("dead hang 40s, 35s, 30s", "dead hang"),
+    ("plank 2 min", "plank"),
+    ("face pulls 3 sets of 12 at 40", "face pulls"),
+    ("Push-up", "push-up"),
+    ("incline DB press 50×10", "incline db press"),
+])
+def test_alias_key(raw, key):
+    assert w.alias_key(raw) == key
+
+
+# ---------------------------------------------------------------------------
+# Sets
+# ---------------------------------------------------------------------------
+
+def test_expand_sets_count_and_validation():
+    sets = [{"weight": 100, "reps": 8, "count": 3}, {"reps": 0}, {"duration_sec": 40},
+            {"weight": 50, "reps": 10, "duration_sec": 30}]
+    assert w.expand_sets(sets) == [
+        (100.0, 8, None), (100.0, 8, None), (100.0, 8, None),
+        (None, None, 40),
+        (50.0, 10, None),  # reps win over duration
+    ]
+
+
+def test_collapse_identical_sets_into_one_row():
+    assert w.collapse_sets([(100, 8, None)] * 3) == [(100, 8, None, 3)]
+
+
+def test_collapse_mixed_sets_into_runs():
+    exp = [(100, 8, None), (100, 8, None), (110, 6, None), (100, 8, None)]
+    assert w.collapse_sets(exp) == [(100, 8, None, 2), (110, 6, None, 1), (100, 8, None, 1)]
+
+
+# ---------------------------------------------------------------------------
+# Sessions
+# ---------------------------------------------------------------------------
+
+def test_session_reused_within_gap():
+    last = NOW - timedelta(hours=2, minutes=59)
+    assert w.assign_session(last, "S-1", NOW) == "S-1"
+
+
+def test_session_new_after_gap():
+    last = NOW - timedelta(hours=3, minutes=1)
+    assert w.assign_session(last, "S-1", NOW) == "S-20261002-1800"
+
+
+def test_session_new_when_no_history():
+    assert w.assign_session(None, "", NOW) == "S-20261002-1800"
+
+
+# ---------------------------------------------------------------------------
+# Directive parsing
+# ---------------------------------------------------------------------------
+
+def test_parse_fenced_directive():
+    raw = ('Logged! Up 10 lb 💪\n```json\n{"workout_action": "log", "entries": '
+           '[{"exercise": "Lat Pulldown", "raw": "lat pulldowns", '
+           '"sets": [{"weight": 100, "reps": 8, "count": 3}]}]}\n```')
+    d = w.parse_workout_directive(raw)
+    assert d["action"] == "log"
+    assert d["entries"][0]["exercise"] == "Lat Pulldown"
+    assert len(d["entries"][0]["sets"]) == 3
+
+
+def test_parse_ignores_reservation_and_meal_blocks():
+    raw = '```json\n[{"item": "Eggs", "calories": 140}]\n```\n```json\n{"reservation_action": "set"}\n```'
+    assert w.parse_workout_directive(raw) is None
+
+
+def test_parse_delete_last_needs_no_entries():
+    d = w.parse_workout_directive('Done.\n```json\n{"workout_action": "delete_last", "entries": []}\n```')
+    assert d == {"action": "delete_last", "entries": []}
+
+
+def test_parse_rejects_bad_action_and_empty_log():
+    assert w.parse_workout_directive('```json\n{"workout_action": "nuke"}\n```') is None
+    assert w.parse_workout_directive('```json\n{"workout_action": "log", "entries": []}\n```') is None
+
+
+def test_parse_unfenced_single_line():
+    raw = 'Nice.\n{"workout_action": "log", "entries": [{"exercise": "Dead Hang", "raw": "dead hang", "sets": [{"duration_sec": 40}]}]}'
+    d = w.parse_workout_directive(raw)
+    assert d["entries"][0]["sets"] == [(None, None, 40)]
+
+
+# ---------------------------------------------------------------------------
+# Canonical resolution
+# ---------------------------------------------------------------------------
+
+def test_alias_table_overrides_model_at_write_time():
+    aliases = {"floor pushups": "Push-up"}
+    assert w.resolve_canonical("floor pushups", "Floor Push-up", aliases) == "Push-up"
+    assert w.resolve_canonical("face pulls", "Face Pull", aliases) == "Face Pull"
+
+
+def test_build_rows_and_new_aliases():
+    entries = [{"exercise": "Lat Pulldown", "raw": "lat pulldowns",
+                "sets": [(100.0, 8, None)] * 2 + [(102.5, 6, None)]}]
+    rows, summary = w.build_rows(entries, {}, "2026-10-02 18:00:00", "S-x", "E-x")
+    assert rows == [
+        ["2026-10-02 18:00:00", "S-x", "E-x", "Lat Pulldown", "lat pulldowns", 100, 8, "", 2],
+        ["2026-10-02 18:00:00", "S-x", "E-x", "Lat Pulldown", "lat pulldowns", 102.5, 6, "", 1],
+    ]
+    assert w.new_alias_rows(summary, {}, "2026-10-02") == [
+        ["lat pulldowns", "Lat Pulldown", "2026-10-02"],
+        ["lat pulldown", "Lat Pulldown", "2026-10-02"],
+    ]
+    # Nothing new once both keys are known
+    known = {"lat pulldowns": "Lat Pulldown", "lat pulldown": "Lat Pulldown"}
+    assert w.new_alias_rows(summary, known, "2026-10-02") == []
+
+
+def test_read_time_resolution_regroups_history():
+    values = sheet([
+        (ts(5), "S-a", "E-1", "Cable Pulldown", "cable pulldown", 90, 8, "", 3),
+        (ts(2), "S-b", "E-2", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3),
+    ])
+    rows = w.parse_rows(values)
+    # Before remap: two separate exercises
+    assert set(w.exercise_stats(rows, {}, NOW)) == {"Cable Pulldown", "Lat Pulldown"}
+    # User re-points the alias in the sheet → history merges
+    aliases = {"cable pulldown": "Lat Pulldown"}
+    stats = w.exercise_stats(rows, aliases, NOW)
+    assert set(stats) == {"Lat Pulldown"}
+    assert stats["Lat Pulldown"]["sessions"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+def pulldown_history():
+    return w.parse_rows(sheet([
+        (ts(20), "S-1", "E-1", "Lat Pulldown", "lat pulldowns", 80, 10, "", 3),
+        (ts(14), "S-2", "E-2", "Lat Pulldown", "lat pulldowns", 90, 8, "", 3),
+        (ts(7), "S-3", "E-3", "Lat Pulldown", "lat pulldowns", 100, 8, "", 2),
+        (ts(7, minute=5), "S-3", "E-4", "Lat Pulldown", "lat pulldowns", 120, 4, "", 1),
+        (ts(2), "S-4", "E-5", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3),
+    ]))
+
+
+def test_working_weight_is_avg_top_set_last_3_sessions():
+    s = w.exercise_stats(pulldown_history(), {}, NOW)["Lat Pulldown"]
+    # top sets: 80, 90, 120, 100 → last 3 = 90, 120, 100
+    assert s["working"] == pytest.approx((90 + 120 + 100) / 3)
+
+
+def test_pr_and_last_session():
+    s = w.exercise_stats(pulldown_history(), {}, NOW)["Lat Pulldown"]
+    assert s["pr"] == "120×4"
+    assert s["pr_date"] == "2026-09-25"
+    assert s["last_date"] == "2026-09-30"
+    assert s["last_sets"] == "100×8 ×3"
+    assert s["today_sets"] is None
+
+
+def test_current_session_excluded_from_last():
+    rows = pulldown_history() + w.parse_rows(sheet([
+        (NOW.replace(hour=17, minute=30).strftime(w.TS_FMT), "S-5", "E-6",
+         "Lat Pulldown", "lat pulldowns", 110, 8, "", 1),
+    ]))
+    s = w.exercise_stats(rows, {}, NOW)["Lat Pulldown"]
+    assert s["last_date"] == "2026-09-30"      # still the prior session
+    assert s["today_sets"] == "110×8"
+
+
+def test_weight_tie_broken_by_reps():
+    rows = w.parse_rows(sheet([
+        (ts(1), "S-1", "E-1", "Squat", "squat", 185, 5, "", 1),
+        (ts(1, minute=5), "S-1", "E-2", "Squat", "squat", 185, 7, "", 1),
+    ]))
+    assert w.exercise_stats(rows, {}, NOW)["Squat"]["pr"] == "185×7"
+
+
+def test_bodyweight_and_timed_have_no_working_weight():
+    rows = w.parse_rows(sheet([
+        (ts(3), "S-1", "E-1", "Push-up", "pushups", "", 20, "", 4),
+        (ts(1), "S-2", "E-2", "Push-up", "floor pushups", "", 25, "", 1),
+        (ts(1, minute=10), "S-2", "E-3", "Dead Hang", "dead hang", "", "", 40, 1),
+        (ts(1, minute=11), "S-2", "E-3", "Dead Hang", "dead hang", "", "", 45, 1),
+    ]))
+    stats = w.exercise_stats(rows, {"floor pushups": "Push-up", "pushups": "Push-up"}, NOW)
+    assert stats["Push-up"]["kind"] == "bodyweight"
+    assert stats["Push-up"]["working"] is None
+    assert stats["Push-up"]["pr"] == "25 reps"
+    assert stats["Dead Hang"]["kind"] == "timed"
+    assert stats["Dead Hang"]["pr"] == "45s"
+    assert stats["Dead Hang"]["last_sets"] == "40s, 45s"
+
+
+def test_snapshot_contents():
+    rows = pulldown_history()
+    snap = w.build_snapshot(rows, {"lat pulldowns": "Lat Pulldown", "pulldown": "Lat Pulldown"}, NOW)
+    assert "Lat Pulldown [aliases: lat pulldowns, pulldown]" in snap
+    assert "working weight 103.3 lb" in snap
+    assert "PR 120×4 (2026-09-25)" in snap
+    assert "last session 2026-09-30: 100×8 ×3 (top 100×8)" in snap
+
+
+def test_snapshot_empty():
+    assert "No exercises logged yet" in w.build_snapshot([], {}, NOW)
+
+
+# ---------------------------------------------------------------------------
+# Intent detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "lat pulldowns, 100 x 8 x 3",
+    "dead hang 40s",
+    "face pulls 3 sets of 12",
+    "what's my current working weight for lat pulldowns?",
+    "what's my PR on squat",
+    "did 25 reps",
+])
+def test_workout_intent_positive(text):
+    assert w.looks_like_workout(text)
+
+
+@pytest.mark.parametrize("text", [
+    "chicken breast 6oz",
+    "2 slices of toast with butter",
+    "protein shake",
+    "how am I doing on protein today?",
+])
+def test_workout_intent_negative(text):
+    assert not w.looks_like_workout(text)
+
+
+def test_workout_intent_cold_start_vocabulary():
+    assert w.looks_like_workout("pushups 80")
+    assert w.looks_like_workout("dead hang")
+
+
+def test_workout_intent_via_known_alias():
+    assert not w.looks_like_workout("skull crushers")
+    assert w.looks_like_workout("skull crushers", {"skull crushers"})
