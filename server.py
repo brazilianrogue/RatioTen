@@ -609,7 +609,8 @@ def _read_persistent_chat(user_id: str = DEFAULT_USER) -> list[dict]:
             try:
                 parts = json.loads(row[2])
                 content = [p.get("text", "") for p in parts]
-                history.append({"role": str(row[1]), "content": content, "timestamp": str(row[0])})
+                history.append({"role": str(row[1]), "content": content, "timestamp": str(row[0]),
+                                "mode": str(row[3]).strip() if len(row) > 3 else ""})
             except Exception:
                 continue
         return history
@@ -617,7 +618,23 @@ def _read_persistent_chat(user_id: str = DEFAULT_USER) -> list[dict]:
         return []
 
 
-def _log_chat_to_sheet(role: str, content, user_id: str = DEFAULT_USER):
+_chat_mode_col_ready: set[str] = set()   # user_ids whose Chat_History has the Mode column
+
+
+def _ensure_chat_mode_col(ws, user_id: str):
+    """Chat_History was created with 3 columns; add a 4th 'Mode' column once."""
+    if user_id in _chat_mode_col_ready:
+        return
+    if ws.col_count < 4:
+        ws.add_cols(4 - ws.col_count)
+    if not ws.acell("D1").value:
+        ws.update_acell("D1", "Mode")
+    _chat_mode_col_ready.add(user_id)
+
+
+def _log_chat_to_sheet(role: str, content, user_id: str = DEFAULT_USER, mode: str = ""):
+    """Append a chat row.  `mode` ("workout" or "") tags assistant turns so the
+    next message can tell whether the coach was mid-workout."""
     try:
         sh = _get_sh(user_id)
         try:
@@ -631,7 +648,14 @@ def _log_chat_to_sheet(role: str, content, user_id: str = DEFAULT_USER):
             for item in content:
                 parts.append({"text": str(item) if not isinstance(item, bytes) else "📷 *Photo attached*"})
         ts = datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M:%S")
-        ws.append_row([ts, role, json.dumps(parts)])
+        row = [ts, role, json.dumps(parts)]
+        if mode:
+            try:
+                _ensure_chat_mode_col(ws, user_id)
+                row.append(mode)
+            except Exception as e:
+                log.warning("_log_chat_to_sheet: could not add Mode column: %s", e)
+        ws.append_row(row)
         _invalidate(f"chat_history_{user_id}")
     except Exception:
         pass
@@ -862,6 +886,24 @@ def _read_exercise_aliases(user_id: str = DEFAULT_USER) -> dict[str, str]:
         return {}
 
 
+def _write_alias_remaps(sh: gspread.Spreadsheet, remaps: dict[str, str], today: str, user_id: str):
+    """Re-point alias rows in place (every row with that key, so no stale
+    duplicate lingers); append a row for keys not yet in the tab."""
+    aws = _workout_ws(sh, WS_EXERCISE_ALIASES, ALIAS_HEADERS, create=True)
+    values = aws.get_all_values()
+    found = set()
+    for i, r in enumerate(values[1:], start=2):
+        key = workouts.alias_key(r[0]) if r else ""
+        if key in remaps:
+            aws.update(range_name=f"B{i}:C{i}", values=[[remaps[key], today]])
+            found.add(key)
+    missing = [[k, v, today] for k, v in remaps.items() if k not in found]
+    if missing:
+        aws.append_rows(missing)
+    _invalidate(f"exercise_aliases_{user_id}")
+    _invalidate(f"workout_values_{user_id}")
+
+
 def _apply_workout_directive(directive: dict, user_id: str = DEFAULT_USER) -> Optional[dict]:
     """Write a parsed workout directive to the sheet.
 
@@ -876,6 +918,16 @@ def _apply_workout_directive(directive: dict, user_id: str = DEFAULT_USER) -> Op
         aliases = _read_exercise_aliases(user_id)
         now = datetime.now(EASTERN).replace(tzinfo=None)
         action = directive["action"]
+
+        # Deliberate remaps (user said a mapping is wrong) update the alias tab
+        # first, so build_rows below resolves through the corrected mapping.
+        remaps = workouts.remap_pairs(directive["entries"], aliases)
+        if remaps:
+            _write_alias_remaps(sh, remaps, now.strftime("%Y-%m-%d"), user_id)
+            aliases.update(remaps)
+        remapped = [{"raw": k, "exercise": v} for k, v in remaps.items()]
+        if action == "remap":
+            return {"action": action, "entries": [], "remapped": remapped} if remapped else None
 
         ts = now.strftime(workouts.TS_FMT)
         entry_id = workouts.new_entry_id(now)
@@ -910,29 +962,25 @@ def _apply_workout_directive(directive: dict, user_id: str = DEFAULT_USER) -> Op
             aws.append_rows(new_aliases)
             _invalidate(f"exercise_aliases_{user_id}")
         _invalidate(f"workout_values_{user_id}")
-        return {"action": action, "entries": summary}
+        return {"action": action, "entries": summary, "remapped": remapped}
     except Exception as e:
         log.error("_apply_workout_directive failed: %s", e)
         return None
 
 
 def _is_workout_turn(text: str, history: list, aliases: dict[str, str]) -> bool:
-    """Workout intent for this message — or a short follow-up to a recent
-    workout message (name confirmation, "fix that", "scratch that")."""
-    if workouts.looks_like_workout(text, set(aliases)):
-        return True
-    if len(text) > 80:
-        return False
-    prev = next((h for h in reversed(history) if h.get("role") == "user"), None)
-    if not prev:
-        return False
-    try:
-        prev_ts = datetime.strptime(prev.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
-        if datetime.now(EASTERN).replace(tzinfo=None) - prev_ts > timedelta(hours=3):
-            return False
-    except ValueError:
-        return False
-    return workouts.looks_like_workout(" ".join(prev.get("content", [])), set(aliases))
+    """Workout intent for this message, using the coach's last reply as context
+    (see workouts.is_workout_turn for the priority rules)."""
+    prev = next((h for h in reversed(history) if h.get("role") in ("assistant", "model")), None)
+    prev_mode, prev_ts = "", None
+    if prev:
+        prev_mode = prev.get("mode", "")
+        try:
+            prev_ts = datetime.strptime(prev.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            prev_ts = None
+    return workouts.is_workout_turn(text, set(aliases), prev_mode, prev_ts,
+                                    datetime.now(EASTERN).replace(tzinfo=None))
 
 
 def _parse_reservation(raw: str) -> Optional[dict]:
@@ -1619,7 +1667,7 @@ async def clear_chat(user_id: str = Query(DEFAULT_USER)):
         sh = _get_sh(uid)
         ws = sh.worksheet(WS_CHAT_HISTORY)
         ws.clear()
-        ws.append_row(["Timestamp", "Role", "Parts"])
+        ws.append_row(["Timestamp", "Role", "Parts", "Mode"])
         _invalidate(f"chat_history_{uid}")
         return {"ok": True}
     except Exception as e:
@@ -1719,7 +1767,8 @@ async def chat(
     # Workout mode: append the workout section + server-computed history
     # snapshot only when this turn looks workout-related.
     aliases = _cached(f"exercise_aliases_{uid}", 600, lambda: _read_exercise_aliases(uid))
-    if _is_workout_turn(text, history, aliases):
+    workout_turn = _is_workout_turn(text, history, aliases)
+    if workout_turn:
         w_values = _cached(f"workout_values_{uid}", 600, lambda: _read_workout_values(uid))
         w_rows = workouts.parse_rows(w_values) if w_values else []
         w_now = datetime.now(EASTERN).replace(tzinfo=None)
@@ -1807,7 +1856,11 @@ async def chat(
         # reservation object) are stripped so raw JSON never sits in the chat
         # sheet or feeds back into a later turn's history. Parsing above and the
         # reservation handling below still use the intact full_response.
-        _log_chat_to_sheet("assistant", _strip_directive_blocks(full_response), uid)
+        # Tag the coach's reply as a workout turn (a food log in a workout-mode
+        # turn means the model took the food path) so a follow-up like "yes" or
+        # "that was actually 110" keeps workout context next message.
+        coach_mode = "workout" if workout_turn and not meal_log else ""
+        _log_chat_to_sheet("assistant", _strip_directive_blocks(full_response), uid, mode=coach_mode)
         _invalidate(f"chat_history_{uid}")
 
         # Write meal entries to sheet

@@ -264,3 +264,53 @@ def test_workout_intent_cold_start_vocabulary():
 def test_workout_intent_via_known_alias():
     assert not w.looks_like_workout("skull crushers")
     assert w.looks_like_workout("skull crushers", {"skull crushers"})
+
+
+# ---------------------------------------------------------------------------
+# Turn classification
+# ---------------------------------------------------------------------------
+
+RECENT = NOW - timedelta(minutes=10)
+
+
+@pytest.mark.parametrize("text,prev_mode,prev_ts,expected", [
+    # strong workout signals win regardless of context
+    ("lat pulldowns 100x8x3", "", None, True),
+    ("did pushups 80 and ate an apple", "", None, True),        # mixed -> case C
+    # clear food / done signals beat follow-up context
+    ("chicken breast 6oz", "workout", RECENT, False),
+    ("time to eat!", "workout", RECENT, False),
+    ("breaking my fast now", "workout", RECENT, False),
+    ("post-workout shake", "workout", RECENT, False),
+    ("done with my workout", "workout", RECENT, False),
+    ("workout's over", "workout", RECENT, False),
+    ("leaving the gym", "workout", RECENT, False),
+    ("how's my protein today?", "workout", RECENT, False),
+    # weak gym words with no food signal
+    ("heading to the gym", "", None, True),
+    # follow-ups depend on the coach's last reply
+    ("yes", "workout", RECENT, True),
+    ("scratch that", "workout", RECENT, True),
+    ("sorry I misread the stack, it was actually one ten not one hundred", "workout", RECENT, True),
+    ("yes", "", RECENT, False),
+    ("yes", "workout", NOW - timedelta(hours=4), False),
+])
+def test_is_workout_turn(text, prev_mode, prev_ts, expected):
+    assert w.is_workout_turn(text, set(), prev_mode, prev_ts, NOW) is expected
+
+
+def test_parse_remap_action_without_sets():
+    raw = '```json\n{"workout_action": "remap", "entries": [{"exercise": "Cable Pulldown", "raw": "cable pulldown"}]}\n```'
+    d = w.parse_workout_directive(raw)
+    assert d == {"action": "remap", "entries": [
+        {"exercise": "Cable Pulldown", "raw": "cable pulldown", "sets": [], "remap": True}]}
+
+
+def test_remap_pairs_only_for_flagged_changes():
+    entries = [
+        {"exercise": "Cable Pulldown", "raw": "cable pulldown", "remap": True},
+        {"exercise": "Lat Pulldown", "raw": "lat pulldowns", "remap": True},     # already mapped
+        {"exercise": "Squat", "raw": "squats", "remap": False},
+    ]
+    aliases = {"cable pulldown": "Lat Pulldown", "lat pulldowns": "Lat Pulldown"}
+    assert w.remap_pairs(entries, aliases) == {"cable pulldown": "Cable Pulldown"}

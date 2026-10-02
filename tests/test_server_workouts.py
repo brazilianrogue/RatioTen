@@ -36,8 +36,35 @@ class FakeWS:
     def clear(self):
         self.rows = []
 
-    def update(self, *_a, **_k):
-        pass
+    # --- cell-level API used by the Mode column and alias remaps ---
+    @property
+    def col_count(self):
+        return self._cols if hasattr(self, "_cols") else 3
+
+    def add_cols(self, n):
+        self._cols = self.col_count + n
+
+    def _cell(self, a1):
+        col = ord(a1[0]) - ord("A")
+        return int(a1[1:]) - 1, col
+
+    def acell(self, a1):
+        r, c = self._cell(a1)
+        val = self.rows[r][c] if r < len(self.rows) and c < len(self.rows[r]) else ""
+        return type("Cell", (), {"value": val})()
+
+    def update_acell(self, a1, value):
+        self.update(range_name=a1, values=[[value]])
+
+    def update(self, range_name=None, values=None, **_):
+        if range_name is None:
+            return
+        start = range_name.split(":")[0]
+        r, c = self._cell(start)
+        for dr, vals in enumerate(values):
+            row = self.rows[r + dr]
+            row.extend([""] * (c + len(vals) - len(row)))
+            row[c:c + len(vals)] = vals
 
 
 class FakeSheet:
@@ -73,6 +100,7 @@ class FakeSession:
 def env(monkeypatch):
     sh = FakeSheet()
     server._cache.clear()
+    server._chat_mode_col_ready.clear()
     monkeypatch.setattr(server, "_get_sh", lambda user_id="ed": sh)
     state = {"reply": "", "prompt": ""}
 
@@ -191,3 +219,111 @@ def test_directive_hidden_from_stored_chat(env):
     chat(client, state, "lat pulldowns 100x8x3", "Logged!" + directive(LOG_PULLDOWN))
     stored = sh.tabs["Chat_History"].rows[-1][2]
     assert "workout_action" not in stored
+
+
+# ---------------------------------------------------------------------------
+# Follow-up detection via the coach's last reply
+# ---------------------------------------------------------------------------
+
+def test_coach_reply_tagged_as_workout(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    chat(client, state, "chicken breast 6oz", "Nice.")
+    rows = sh.tabs["Chat_History"].rows
+    assert rows[0][3] == "Mode"
+    coach = [r for r in rows if r[1] == "assistant"]
+    assert coach[0][3] == "workout"
+    assert len(coach[1]) == 3            # food reply carries no mode
+
+
+def test_long_correction_after_workout_reply_keeps_workout_mode(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    chat(client, state, "sorry, I misread the stack on that one, it was actually one hundred ten not one hundred", "Fixed.")
+    assert "WORKOUT MODE" in state["prompt"]
+
+
+def test_food_after_workout_reply_is_food(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    chat(client, state, "chicken breast 6oz", "Nice.")
+    assert "WORKOUT MODE" not in state["prompt"]
+
+
+def test_workout_over_ends_workout_context(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    chat(client, state, "ok done with my workout", "Great session!")
+    assert "WORKOUT MODE" not in state["prompt"]
+    # The coach's reply to that was a non-workout turn, so a bare follow-up stays food
+    chat(client, state, "yes", "ok")
+    assert "WORKOUT MODE" not in state["prompt"]
+
+
+def test_name_confirmation_follow_up(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    chat(client, state, "cable pulldown 80x10x3", "Is 'cable pulldown' your Lat Pulldown?")
+    chat(client, state, "no, it's its own thing", "ok")
+    assert "WORKOUT MODE" in state["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# Remap
+# ---------------------------------------------------------------------------
+
+def aliases_of(sh):
+    return {r[0]: r[1] for r in sh.tabs[WS_EXERCISE_ALIASES].rows[1:]}
+
+
+def test_permanent_remap_moves_past_logs(env):
+    sh, state, client = env
+    wrong = {"workout_action": "log", "entries": [
+        {"exercise": "Lat Pulldown", "raw": "cable pulldown", "sets": [{"weight": 80, "reps": 10, "count": 3}]}]}
+    chat(client, state, "cable pulldown 80x10x3", "ok" + directive(wrong))
+    assert aliases_of(sh)["cable pulldown"] == "Lat Pulldown"
+
+    remap = {"workout_action": "remap", "entries": [{"exercise": "Cable Pulldown", "raw": "cable pulldown"}]}
+    done = chat(client, state, "cable pulldown isn't my lat pulldown, it's its own exercise",
+                "Remapped, including past logs." + directive(remap))
+    assert done["workout"]["remapped"] == [{"raw": "cable pulldown", "exercise": "Cable Pulldown"}]
+    al = aliases_of(sh)
+    assert al["cable pulldown"] == "Cable Pulldown"
+    assert al["lat pulldown"] == "Lat Pulldown"       # untouched
+    keys = [r[0] for r in sh.tabs[WS_EXERCISE_ALIASES].rows[1:]]
+    assert keys.count("cable pulldown") == 1          # updated in place, no duplicate
+    # The past row now resolves to the new exercise in the snapshot
+    chat(client, state, "what's my PR on cable pulldown?", "80x10.")
+    assert "Cable Pulldown" in state["prompt"]
+    assert "PR 80×10" in state["prompt"]
+
+
+def test_remap_flag_on_log_entry(env):
+    sh, state, client = env
+    chat(client, state, "cable pulldown 80x10x3", "ok" + directive({"workout_action": "log", "entries": [
+        {"exercise": "Lat Pulldown", "raw": "cable pulldown", "sets": [{"weight": 80, "reps": 10}]}]}))
+    chat(client, state, "cable pulldown 85x10, and that's NOT lat pulldown, always its own exercise",
+         "ok" + directive({"workout_action": "log", "entries": [
+             {"exercise": "Cable Pulldown", "raw": "cable pulldown", "remap": True,
+              "sets": [{"weight": 85, "reps": 10}]}]}))
+    assert sh.tabs[WS_WORKOUT_LOGS].rows[-1][3] == "Cable Pulldown"
+    assert aliases_of(sh)["cable pulldown"] == "Cable Pulldown"
+
+
+def test_without_remap_alias_still_wins(env):
+    sh, state, client = env
+    chat(client, state, "pulldown 100x8x3", "ok" + directive({"workout_action": "log", "entries": [
+        {"exercise": "Lat Pulldown", "raw": "pulldown", "sets": [{"weight": 100, "reps": 8}]}]}))
+    chat(client, state, "pulldown 110x8", "ok" + directive({"workout_action": "log", "entries": [
+        {"exercise": "Something Else", "raw": "pulldown", "sets": [{"weight": 110, "reps": 8}]}]}))
+    assert sh.tabs[WS_WORKOUT_LOGS].rows[-1][3] == "Lat Pulldown"
+
+
+def test_one_off_variant_via_specific_raw(env):
+    sh, state, client = env
+    chat(client, state, "pulldown 100x8x3", "ok" + directive({"workout_action": "log", "entries": [
+        {"exercise": "Lat Pulldown", "raw": "pulldown", "sets": [{"weight": 100, "reps": 8}]}]}))
+    chat(client, state, "pulldown 80x10 but close grip today", "ok" + directive({"workout_action": "log", "entries": [
+        {"exercise": "Close-Grip Pulldown", "raw": "close grip pulldown", "sets": [{"weight": 80, "reps": 10}]}]}))
+    assert sh.tabs[WS_WORKOUT_LOGS].rows[-1][3] == "Close-Grip Pulldown"
+    assert aliases_of(sh)["pulldown"] == "Lat Pulldown"

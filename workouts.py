@@ -172,7 +172,11 @@ def resolve_exercise(row: dict, aliases: dict[str, str]) -> str:
 
 
 def resolve_canonical(raw: str, model_exercise: str, aliases: dict[str, str]) -> str:
-    """At write time the alias table wins over the model's suggestion."""
+    """At write time the alias table wins over the model's suggestion.
+
+    A deliberate remap updates `aliases` BEFORE this runs (see remap_pairs), so
+    the user's chat correction flows through the same path.
+    """
     key = alias_key(raw)
     if key and key in aliases:
         return aliases[key]
@@ -355,16 +359,21 @@ def build_snapshot(rows: list[dict], aliases: dict[str, str], now: datetime) -> 
 # Intent detection
 # ---------------------------------------------------------------------------
 
-_WORKOUT_RE = re.compile(
+# STRONG signals: set notation, rep/time counts, stat questions. These win over
+# food signals so a mixed message still reaches workout mode (case C → split).
+_STRONG_WORKOUT_RE = re.compile(
     r"\d+(?:\.\d+)?\s*[x×]\s*\d+"                       # 100 x 8, 8x3
     r"|\b\d+\s*(?:s|sec|secs|seconds)\b"                # 40s, 30 sec
     r"|\bsets?\s+of\b|\b\d+\s*reps?\b"                  # 3 sets of 12, 12 reps
-    r"|\bworking\s+weight\b|\bworkout\b|\bexercise"     # questions / keywords
-    r"|\bprs?\b|\bpersonal\s+(?:best|record)\b"
-    r"|\blift(?:ed|ing)?\b|\bgym\b|\btrain(?:ed|ing)\b",
+    r"|\bworking\s+weight\b|\bprs?\b|\bpersonal\s+(?:best|record)\b",
     re.IGNORECASE,
 )
-
+# WEAK signals: general gym words. Food / end-of-workout signals override these
+# ("post-workout meal", "done with my workout").
+_WEAK_WORKOUT_RE = re.compile(
+    r"\bworkouts?\b|\bexercis|\blift(?:ed|ing)?\b|\bgym\b|\btrain(?:ed|ing)\b",
+    re.IGNORECASE,
+)
 
 # Cold-start vocabulary so "pushups 80" is recognised before any aliases exist.
 # False positives are cheap: the prompt section tells the model to ignore it for food.
@@ -376,17 +385,70 @@ _COMMON_EXERCISE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The user says the workout is over: "done with my workout", "workout's over",
+# "finished at the gym", "leaving the gym".
+_WORKOUT_OVER_RE = re.compile(
+    r"\b(?:done|finished|wrapped(?:\s+up)?|over|through)\b[\w\s']{0,20}?\b(?:workout|gym|lifting|training|session)\b"
+    r"|\b(?:workout|session|training|lifting)(?:'s|\s+is|\s+was)?\s+(?:done|over|finished|complete|wrapped)\b"
+    r"|\bleaving\s+the\s+gym\b|\bthat'?s\s+a\s+wrap\b",
+    re.IGNORECASE,
+)
+# Clear food intent: meal words, eating verbs, food units, macro questions.
+_FOOD_RE = re.compile(
+    r"\b(?:food\s+time|time\s+to\s+eat|time\s+for\s+(?:food|a\s+meal|lunch|dinner|breakfast|a\s+snack)"
+    r"|break(?:ing)?\s+(?:my\s+|the\s+)?fast|post[\s-]?workout\s+(?:meal|shake|food|snack)"
+    r"|breakfast|lunch|dinner|snack|meal|ate|eat|eating|drank|drinking"
+    r"|protein|calories?|macros?|kcal)\b"
+    r"|\b\d+(?:\.\d+)?\s*(?:oz|g|grams?|ml|cups?|tbsp|tsp|slices?|cal|kcal)\b",
+    re.IGNORECASE,
+)
+
+
+def _mentions_alias(text: str, known_keys) -> bool:
+    low = " " + re.sub(r"\s+", " ", re.sub(r"[^a-z\s-]", " ", str(text or "").lower())) + " "
+    return any(k and f" {k} " in low for k in known_keys or ())
+
+
+def strong_workout_signal(text: str, known_keys: set[str] | None = None) -> bool:
+    t = str(text or "")
+    return bool(_STRONG_WORKOUT_RE.search(t) or _COMMON_EXERCISE_RE.search(t)
+                or _mentions_alias(t, known_keys))
+
+
+def food_or_done_signal(text: str) -> bool:
+    t = str(text or "")
+    return bool(_WORKOUT_OVER_RE.search(t) or _FOOD_RE.search(t))
+
 
 def looks_like_workout(text: str, known_keys: set[str] | None = None) -> bool:
-    t = str(text or "")
-    if _WORKOUT_RE.search(t) or _COMMON_EXERCISE_RE.search(t):
+    """Context-free check (no conversation state)."""
+    if strong_workout_signal(text, known_keys):
         return True
-    low = " " + re.sub(r"[^a-z\s]", " ", t.lower()) + " "
-    low = re.sub(r"\s+", " ", low)
-    for k in known_keys or ():
-        if k and f" {k} " in low:
-            return True
-    return False
+    return bool(_WEAK_WORKOUT_RE.search(str(text or ""))) and not food_or_done_signal(text)
+
+
+def is_workout_turn(text: str, known_keys: set[str] | None, prev_coach_mode: str,
+                    prev_coach_ts: Optional[datetime], now: datetime,
+                    gap_hours: float = SESSION_GAP_HOURS) -> bool:
+    """Decide whether this message gets the workout prompt section.
+
+    Priority:
+      1. Strong workout signal (sets, reps, exercise names, stat questions) → yes.
+         A mixed food+exercise message lands here on purpose (case C: split it).
+      2. Clear food intent or "workout's over" → no.
+      3. Weak gym words ("workout", "gym") → yes.
+      4. Follow-up: the coach's LAST reply was a workout turn (logged a set,
+         asked a name question, answered a workout question) within the
+         session gap → yes. Covers "yes", "fix that", long corrections.
+    """
+    if strong_workout_signal(text, known_keys):
+        return True
+    if food_or_done_signal(text):
+        return False
+    if _WEAK_WORKOUT_RE.search(str(text or "")):
+        return True
+    return (prev_coach_mode == "workout" and prev_coach_ts is not None
+            and (now - prev_coach_ts) <= timedelta(hours=gap_hours))
 
 
 # ---------------------------------------------------------------------------
@@ -394,13 +456,14 @@ def looks_like_workout(text: str, known_keys: set[str] | None = None) -> bool:
 # ---------------------------------------------------------------------------
 
 _FENCED_OBJ_RE = re.compile(r"```[a-zA-Z]*\s*(\{[\s\S]*?\})\s*```")
-_VALID_ACTIONS = {"log", "replace_last", "delete_last"}
+_VALID_ACTIONS = {"log", "replace_last", "delete_last", "remap"}
 
 
 def parse_workout_directive(raw: str) -> Optional[dict]:
     """Find the {"workout_action": ...} object in the model response.
 
-    Returns {"action": str, "entries": [{"exercise", "raw", "sets"}]} or None.
+    Returns {"action": str, "entries": [{"exercise", "raw", "sets", "remap"}]} or None.
+    A "remap" action only re-points aliases, so its entries carry no sets.
     """
     candidates = [m.group(1) for m in _FENCED_OBJ_RE.finditer(raw or "")]
     # Unfenced fallback: a bare object on its own lines
@@ -419,18 +482,41 @@ def parse_workout_directive(raw: str) -> Optional[dict]:
         for e in obj.get("entries") or []:
             if not isinstance(e, dict):
                 continue
+            exercise = str(e.get("exercise", "")).strip()
+            raw_phrase = str(e.get("raw", "") or exercise).strip()
+            if action == "remap":
+                if exercise and alias_key(raw_phrase):
+                    entries.append({"exercise": exercise, "raw": raw_phrase, "sets": [], "remap": True})
+                continue
             exp = expand_sets(e.get("sets") or [])
             if not exp:
                 continue
             entries.append({
-                "exercise": str(e.get("exercise", "")).strip(),
-                "raw": str(e.get("raw", "") or e.get("exercise", "")).strip(),
+                "exercise": exercise,
+                "raw": raw_phrase,
                 "sets": exp,
+                "remap": bool(e.get("remap")) and bool(exercise),
             })
         if action != "delete_last" and not entries:
             return None
         return {"action": action, "entries": entries}
     return None
+
+
+def remap_pairs(entries: list[dict], aliases: dict[str, str]) -> dict[str, str]:
+    """{alias_key: new canonical} for remap-flagged entries whose mapping changes.
+
+    Remapping is retroactive by design: every past row typed with that phrase
+    resolves to the new exercise at read time.
+    """
+    out = {}
+    for e in entries:
+        if not e.get("remap"):
+            continue
+        key = alias_key(e["raw"])
+        if key and aliases.get(key) != e["exercise"]:
+            out[key] = e["exercise"]
+    return out
 
 
 def build_rows(entries: list[dict], aliases: dict[str, str], ts: str,
@@ -484,6 +570,9 @@ B) WORKOUT log, workout correction/deletion, an answer to your earlier exercise-
 C) The message contains BOTH food and exercise → log NOTHING (no JSON of either kind). Briefly ask the user to send the
    food and the workout as separate messages.
 
+If the user says the workout is over ("done with my workout", "leaving the gym") or that it's food time
+("time to eat", "breaking my fast"), the workout is finished: respond to that briefly and treat what follows as food.
+
 #### Known exercises (canonical names): {names}
 
 #### WORKOUT HISTORY (server-computed — quote these numbers exactly; never calculate stats yourself)
@@ -506,6 +595,17 @@ C) The message contains BOTH food and exercise → log NOTHING (no JSON of eithe
   ("Is 'cable pulldown' your Lat Pulldown, or a new exercise?") and emit no JSON. When the user answers, log it then
   using the numbers from their earlier message, with "raw" set to their ORIGINAL phrase.
 - If it matches nothing known → log it immediately as a new exercise and say so: "New exercise: Face Pull".
+- The server maps "raw" through the alias list, so the alias list wins over the "exercise" name you send. Two ways to
+  change what gets saved:
+  1) ONE-OFF VARIANT — the user says a known phrase means a different exercise just this time
+     ("pulldown" is normally Lat Pulldown, but today it was close-grip): set "raw" to the specific phrase that
+     distinguishes it ("close grip pulldown") and "exercise" to the variant's name. Do NOT set remap.
+  2) PERMANENT REMAP — the user says a mapping is WRONG and that phrase should ALWAYS mean another exercise
+     ("cable pulldown isn't my lat pulldown, it's its own exercise"): add "remap": true to the entry, with "raw" =
+     that phrase and "exercise" = the correct name. If there are no new sets to log, use workout_action "remap"
+     with entries [{{"exercise": "Cable Pulldown", "raw": "cable pulldown"}}]. Remapping also moves every PAST log
+     typed with that phrase — tell the user that in your reply ("Remapped 'cable pulldown' → Cable Pulldown,
+     including past logs."). Only remap on an explicit user correction, never on your own initiative.
 
 #### Response style for a logged set
 - One short acknowledgement of what was logged, then compare to the LAST SESSION numbers above
@@ -527,7 +627,8 @@ C) The message contains BOTH food and exercise → log NOTHING (no JSON of eithe
 ```json
 {{"workout_action": "log", "entries": [{{"exercise": "Lat Pulldown", "raw": "lat pulldowns", "sets": [{{"weight": 100, "reps": 8, "count": 3}}]}}]}}
 ```
-- workout_action: "log" | "replace_last" | "delete_last".
+- workout_action: "log" | "replace_last" | "delete_last" | "remap".
+- Optional per-entry "remap": true — ONLY for a permanent remap the user explicitly asked for (see Exercise names).
 - One entry per exercise in the message. "raw" = the user's exercise phrase without the numbers.
 - sets: list of {{"weight"?, "reps"?, "duration_sec"?, "count"?}}. Use count for repeated identical sets;
   list differing sets separately: [{{"weight":100,"reps":8}}, {{"weight":110,"reps":6}}].
