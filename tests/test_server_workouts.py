@@ -268,6 +268,32 @@ def test_name_confirmation_follow_up(env):
     assert "WORKOUT MODE" in state["prompt"]
 
 
+def test_unusable_workout_block_warns_user(env):
+    sh, state, client = env
+    bad = {"workout_action": "log", "entries": [
+        {"exercise": "Assisted Dip", "raw": "assisted dips", "sets": [{"weight": -50}, {"weight": -45}]}]}
+    state["reply"] = "Logged!" + directive(bad)
+    r = client.post("/api/chat", data={"text": "assisted dips 50/45/50", "user_id": "ed"})
+    events = [json.loads(l[6:]) for l in r.text.splitlines() if l.startswith("data: ")]
+    streamed = "".join(e.get("token", "") for e in events)
+    assert "Workout not saved" in streamed and "reps" in streamed
+    assert next(e for e in events if e.get("done"))["workout"] is None
+    assert WS_WORKOUT_LOGS not in sh.tabs
+    # The warning is stored in history so the coach sees it next turn
+    assert "Workout not saved" in sh.tabs["Chat_History"].rows[-1][2]
+
+
+def test_assisted_negative_weight_round_trip(env):
+    sh, state, client = env
+    dips = {"workout_action": "log", "entries": [{"exercise": "Assisted Dip", "raw": "assisted dips", "sets": [
+        {"weight": -50, "reps": 8}, {"weight": -45, "reps": 8}, {"weight": -50, "reps": 8}]}]}
+    chat(client, state, "assisted dips 50/45/50 x 8", "ok" + directive(dips))
+    rows = sh.tabs[WS_WORKOUT_LOGS].rows[1:]
+    assert [r[5] for r in rows] == [-50, -45, -50]
+    chat(client, state, "what's my PR on assisted dips?", "45 lb assist.")
+    assert "PR -45×8" in state["prompt"]
+
+
 # ---------------------------------------------------------------------------
 # Remap
 # ---------------------------------------------------------------------------

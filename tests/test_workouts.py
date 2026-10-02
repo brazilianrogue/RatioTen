@@ -41,13 +41,27 @@ def test_alias_key(raw, key):
 # ---------------------------------------------------------------------------
 
 def test_expand_sets_count_and_validation():
-    sets = [{"weight": 100, "reps": 8, "count": 3}, {"reps": 0}, {"duration_sec": 40},
-            {"weight": 50, "reps": 10, "duration_sec": 30}]
+    sets = [{"weight": 100, "reps": 8, "count": 3}, {"duration_sec": 40},
+            {"weight": 50, "reps": 10, "duration_sec": 30}, {"weight": 0, "reps": 12}]
     assert w.expand_sets(sets) == [
         (100.0, 8, None), (100.0, 8, None), (100.0, 8, None),
         (None, None, 40),
         (50.0, 10, None),  # reps win over duration
+        (None, 12, None),  # zero weight = bodyweight
     ]
+
+
+def test_expand_sets_rejects_weight_without_reps():
+    # "assisted dips 50/45/50" with no reps must never be silently dropped
+    with pytest.raises(w.IncompleteSetError):
+        w.expand_sets([{"weight": -50}, {"weight": -45}, {"weight": -50}])
+
+
+def test_assisted_per_set_weights():
+    # "assisted dips 50x8/45x8/50x6" → three sets with negative assistance
+    sets = [{"weight": -50, "reps": 8}, {"weight": -45, "reps": 8}, {"weight": -50, "reps": 6}]
+    assert w.collapse_sets(w.expand_sets(sets)) == [
+        (-50.0, 8, None, 1), (-45.0, 8, None, 1), (-50.0, 6, None, 1)]
 
 
 def test_collapse_identical_sets_into_one_row():
@@ -101,9 +115,14 @@ def test_parse_delete_last_needs_no_entries():
     assert d == {"action": "delete_last", "entries": []}
 
 
-def test_parse_rejects_bad_action_and_empty_log():
-    assert w.parse_workout_directive('```json\n{"workout_action": "nuke"}\n```') is None
-    assert w.parse_workout_directive('```json\n{"workout_action": "log", "entries": []}\n```') is None
+def test_parse_reports_errors_instead_of_silently_failing():
+    assert "error" in w.parse_workout_directive('```json\n{"workout_action": "nuke"}\n```')
+    assert "error" in w.parse_workout_directive('```json\n{"workout_action": "log", "entries": []}\n```')
+    missing_reps = ('```json\n{"workout_action": "log", "entries": [{"exercise": "Assisted Dip", '
+                    '"raw": "assisted dips", "sets": [{"weight": -50}, {"weight": -45}]}]}\n```')
+    assert "reps" in w.parse_workout_directive(missing_reps)["error"]
+    assert "error" in w.parse_workout_directive('```json\n{"workout_action": "log", "entries": [\n```')
+    assert w.parse_workout_directive("Just chatting, no JSON here.") is None
 
 
 def test_parse_unfenced_single_line():
@@ -224,6 +243,23 @@ def test_snapshot_contents():
     assert "working weight 103.3 lb" in snap
     assert "PR 120×4 (2026-09-25)" in snap
     assert "last session 2026-09-30: 100×8 ×3 (top 100×8)" in snap
+
+
+def test_assisted_stats_less_assistance_is_better():
+    rows = w.parse_rows(sheet([
+        (ts(14), "S-1", "E-1", "Assisted Dip", "assisted dips", -60, 8, "", 3),
+        (ts(7), "S-2", "E-2", "Assisted Dip", "assisted dips", -50, 8, "", 1),
+        (ts(7, minute=3), "S-2", "E-2", "Assisted Dip", "assisted dips", -45, 8, "", 1),
+        (ts(7, minute=6), "S-2", "E-2", "Assisted Dip", "assisted dips", -50, 6, "", 1),
+        (ts(2), "S-3", "E-3", "Assisted Dip", "assisted dips", -55, 8, "", 3),
+    ]))
+    s = w.exercise_stats(rows, {}, NOW)["Assisted Dip"]
+    assert s["assisted"] is True
+    assert s["pr"] == "-45×8"                                    # least assistance
+    assert s["working"] == pytest.approx((-60 - 45 - 55) / 3)    # top sets: -60, -45, -55
+    snap = w.build_snapshot(rows, {}, NOW)
+    assert "Assisted Dip (assisted: negative weight = lb of assistance" in snap
+    assert "last session 2026-09-30: -55×8 ×3" in snap
 
 
 def test_snapshot_empty():

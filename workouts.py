@@ -71,22 +71,40 @@ def _int(val) -> Optional[int]:
     return int(round(f)) if f is not None else None
 
 
+def _weight(val) -> Optional[float]:
+    """Weight in lb.  NEGATIVE = machine assistance (assisted dip 50 → -50), so
+    "bigger is better" holds for every stat: -45 beats -50.  Zero/blank → None."""
+    if val is None or val == "":
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    return f if f != 0 else None
+
+
+class IncompleteSetError(ValueError):
+    """A set had a weight but neither reps nor a duration."""
+
+
 def expand_sets(sets: list) -> list[tuple]:
     """Directive set dicts -> one (weight, reps, duration) tuple per performed set.
 
     Each dict may carry weight / reps / duration_sec and an optional count.
     Reps and duration are mutually exclusive; if both arrive, reps win.
-    Sets with neither reps nor duration are dropped.
+    A set with neither reps nor duration raises IncompleteSetError — the coach
+    is told to ask for reps instead, so this only fires on model error and
+    must never be silently dropped.
     """
     out = []
     for s in sets or []:
         if not isinstance(s, dict):
             continue
-        weight = _num(s.get("weight"))
+        weight = _weight(s.get("weight"))
         reps = _int(s.get("reps"))
         duration = None if reps else _int(s.get("duration_sec"))
         if not reps and not duration:
-            continue
+            raise IncompleteSetError("set without reps or duration")
         count = _int(s.get("count")) or 1
         out.extend([(weight, reps, duration)] * count)
     return out
@@ -146,7 +164,7 @@ def parse_rows(values: list[list]) -> list[dict]:
             "entry": str(r[2]).strip(),
             "exercise": str(r[3]).strip(),
             "raw": str(r[4]).strip(),
-            "weight": _num(r[5]),
+            "weight": _weight(r[5]),
             "reps": _int(r[6]),
             "duration": _int(r[7]),
             "sets": _int(r[8]) or 1,
@@ -308,6 +326,7 @@ def exercise_stats(rows: list[dict], aliases: dict[str, str], now: datetime,
 
         stats[name] = {
             "kind": kind,
+            "assisted": kind == "weighted" and all(r["weight"] < 0 for r in ex_rows if r["weight"]),
             "working": working,
             "pr": _fmt_top(pr_row, kind),
             "pr_date": pr_row["ts"].strftime("%Y-%m-%d"),
@@ -335,6 +354,8 @@ def build_snapshot(rows: list[dict], aliases: dict[str, str], now: datetime) -> 
     for name in sorted(stats, key=lambda n: stats[n]["last_ts"], reverse=True):
         s = stats[name]
         tag = {"weighted": "", "bodyweight": " (bodyweight)", "timed": " (timed)"}[s["kind"]]
+        if s["assisted"]:
+            tag = " (assisted: negative weight = lb of assistance; closer to 0 is better)"
         al = sorted(a for a in alias_by_canon.get(name, []) if a != name.lower())
         bits = [f"{name}{tag}" + (f" [aliases: {', '.join(al)}]" if al else "")]
         if s["working"] is not None:
@@ -462,7 +483,9 @@ _VALID_ACTIONS = {"log", "replace_last", "delete_last", "remap"}
 def parse_workout_directive(raw: str) -> Optional[dict]:
     """Find the {"workout_action": ...} object in the model response.
 
-    Returns {"action": str, "entries": [{"exercise", "raw", "sets", "remap"}]} or None.
+    Returns {"action": str, "entries": [{"exercise", "raw", "sets", "remap"}]},
+    or {"error": str} when a workout block is present but unusable (so the
+    caller can tell the user nothing was saved), or None when there's no block.
     A "remap" action only re-points aliases, so its entries carry no sets.
     """
     candidates = [m.group(1) for m in _FENCED_OBJ_RE.finditer(raw or "")]
@@ -477,7 +500,7 @@ def parse_workout_directive(raw: str) -> Optional[dict]:
             continue
         action = str(obj.get("workout_action", "")).strip().lower()
         if action not in _VALID_ACTIONS:
-            return None
+            return {"error": f"unknown workout action '{action}'"}
         entries = []
         for e in obj.get("entries") or []:
             if not isinstance(e, dict):
@@ -488,7 +511,10 @@ def parse_workout_directive(raw: str) -> Optional[dict]:
                 if exercise and alias_key(raw_phrase):
                     entries.append({"exercise": exercise, "raw": raw_phrase, "sets": [], "remap": True})
                 continue
-            exp = expand_sets(e.get("sets") or [])
+            try:
+                exp = expand_sets(e.get("sets") or [])
+            except IncompleteSetError:
+                return {"error": "a set was missing its reps (or time)"}
             if not exp:
                 continue
             entries.append({
@@ -498,8 +524,10 @@ def parse_workout_directive(raw: str) -> Optional[dict]:
                 "remap": bool(e.get("remap")) and bool(exercise),
             })
         if action != "delete_last" and not entries:
-            return None
+            return {"error": "no valid sets were found"}
         return {"action": action, "entries": entries}
+    if "workout_action" in (raw or ""):
+        return {"error": "the workout data couldn't be read"}
     return None
 
 
@@ -584,6 +612,21 @@ If the user says the workout is over ("done with my workout", "leaving the gym")
 - Times: "dead hang 40s, 35s, 30s" = three timed sets. Convert minutes to seconds (2 min = 120).
 - Weights are always lbs. Bodyweight exercises have no weight — omit the weight field.
 - A set has reps OR duration_sec, never both.
+- SLASH LISTS ("50/45/50") = one value PER SET, in order — never a sum, never a single huge set.
+  Decide from the exercise type and WORKOUT HISTORY whether the values are weights or reps:
+    • bodyweight exercise ("pushups 20/15/12") → reps per set: 20, 15, 12.
+    • weighted or assisted exercise whose values sit in its usual weight range ("assisted dips 50/45/50") →
+      weight per set.
+    • per-set pairs ("bench 135x8/145x6/155x4") → weight×reps per set.
+    • "50/45/50 x 8" → those weights, 8 reps each.
+  If you genuinely can't tell whether the numbers are weights or reps → ask, and emit no JSON.
+- EVERY set needs reps or a time. If the user gave weights but no reps ("assisted dips 50/45/50"), do NOT log:
+  restate what you understood and ask for the reps ("Got 3 sets at 50/45/50 lb assist — how many reps each?").
+  When they answer, log the complete sets. Never guess reps and never send a set without reps/duration.
+- ASSISTED machines (assisted dip, assisted pull-up): weight = NEGATIVE assistance — "50 lb assist" → "weight": -50.
+  The canonical name starts with "Assisted" (Assisted Dip, Assisted Pull-up) — a separate exercise from the
+  unassisted one. In replies always say "50 lb assist", never "-50". Less assistance (closer to 0) = progress;
+  the PR is the LEAST assistance.
 - Real-time only: everything is logged as happening now.
 
 #### Exercise names
@@ -615,7 +658,8 @@ If the user says the workout is over ("done with my workout", "leaving the gym")
 
 #### Answering questions
 - "Working weight" = the working weight value above (avg top set, last 3 sessions). For bodyweight or timed
-  exercises it does not apply — say so, and offer their PR / last session instead.
+  exercises it does not apply — say so, and offer their PR / last session instead. For assisted exercises phrase
+  it as assistance ("working assistance ≈ 48 lb").
 - PRs and "what did I do last time" come straight from the history above. If an exercise isn't listed, say there's no data.
 
 #### Corrections
@@ -633,5 +677,7 @@ If the user says the workout is over ("done with my workout", "leaving the gym")
 - sets: list of {{"weight"?, "reps"?, "duration_sec"?, "count"?}}. Use count for repeated identical sets;
   list differing sets separately: [{{"weight":100,"reps":8}}, {{"weight":110,"reps":6}}].
 - Timed example: {{"exercise": "Dead Hang", "raw": "dead hang", "sets": [{{"duration_sec": 40}}, {{"duration_sec": 35}}]}}
+- Assisted example ("assisted dips 50/45/50 x 8"): {{"exercise": "Assisted Dip", "raw": "assisted dips",
+  "sets": [{{"weight": -50, "reps": 8}}, {{"weight": -45, "reps": 8}}, {{"weight": -50, "reps": 8}}]}}
 - Never emit this block for questions, or while waiting for an exercise-name confirmation.
 """

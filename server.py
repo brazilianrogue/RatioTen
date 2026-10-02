@@ -1852,6 +1852,22 @@ async def chat(
             log.warning("chat: model emitted both food and workout directives — logging neither")
             meal_log, workout_directive = None, None
 
+        # --- Workout log / correction / deletion / remap ---
+        # Applied before the reply is stored so a save failure can be appended
+        # to it: the user sees it, and the coach sees it in history next turn.
+        workout_result, workout_error = None, None
+        if workout_directive and "error" in workout_directive:
+            workout_error = workout_directive["error"]
+        elif workout_directive:
+            workout_result = _apply_workout_directive(workout_directive, uid)
+            if workout_result is None:
+                workout_error = "it couldn't be written to the sheet"
+        if workout_error:
+            log.warning("chat: workout not saved: %s", workout_error)
+            notice = f"\n\n⚠️ **Workout not saved** — {workout_error}. Please resend it."
+            full_response += notice
+            yield f"data: {json.dumps({'token': notice})}\n\n"
+
         # Log a display-clean copy to history — directive blocks (meal-log array,
         # reservation object) are stripped so raw JSON never sits in the chat
         # sheet or feeds back into a later turn's history. Parsing above and the
@@ -1920,10 +1936,6 @@ async def chat(
                 )
 
         # --- Workout log / correction / deletion ---
-        workout_result = None
-        if workout_directive:
-            workout_result = _apply_workout_directive(workout_directive, uid)
-
         yield f"data: {json.dumps({'done': True, 'logged': logged_items, 'workout': workout_result})}\n\n"
 
     return StreamingResponse(
