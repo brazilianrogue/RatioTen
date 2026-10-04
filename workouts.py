@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Optional
 
-from constants import SESSION_GAP_HOURS, WORKING_WEIGHT_SESSIONS
+from constants import LIVE_SESSION_MINUTES, SESSION_GAP_HOURS, WORKING_WEIGHT_SESSIONS
 
 TS_FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -338,6 +338,138 @@ def exercise_stats(rows: list[dict], aliases: dict[str, str], now: datetime,
             "last_ts": max(r["ts"] for r in ex_rows),
         }
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Session summary (Log-screen session card + timeline markers)
+# ---------------------------------------------------------------------------
+
+def _sid(row: dict) -> str:
+    return row["session"] or row["ts"].strftime("S-%Y%m%d")
+
+
+def _ui_set(row: dict, is_pr: bool) -> dict:
+    """One set chip.  `count` renders as a small ×N badge on the chip."""
+    w, reps, dur = row["weight"], row["reps"], row["duration"]
+    if w and w < 0:
+        label = f"{_fmt_num(abs(w))} assist" + (f" ×{reps}" if reps else f" · {_fmt_dur(dur or 0)}")
+    elif w and reps:
+        label = f"{_fmt_num(w)}×{reps}"
+    elif w:
+        label = f"{_fmt_num(w)} lb · {_fmt_dur(dur or 0)}"
+    elif reps:
+        label = f"{reps} reps"
+    else:
+        label = _fmt_dur(dur or 0)
+    return {"label": label, "count": row["sets"], "pr": is_pr}
+
+
+def _signed(n: float, unit: str) -> str:
+    return f"{_fmt_num(abs(n))}{unit}"
+
+
+def _delta(top: dict, last: Optional[dict], kind: str) -> dict:
+    """Change of this session's top set vs the previous session's top set.
+
+    tone: ok (improved) | flat (same) | down (lower) | new (no history).
+    For assisted lifts (negative weight) LESS assistance is the improvement.
+    """
+    if last is None:
+        return {"text": "New", "tone": "new"}
+    if kind == "weighted":
+        dw = (top["weight"] or 0) - (last["weight"] or 0)
+        if dw:
+            assisted = (top["weight"] or 0) < 0 and (last["weight"] or 0) < 0
+            # Assistance shrinking (dw > 0) reads as "▼ N lb assist" but is an improvement.
+            arrow = ("▼" if dw > 0 else "▲") if assisted else ("▲" if dw > 0 else "▼")
+            return {"text": f"{arrow} {_signed(dw, ' lb assist' if assisted else ' lb')}",
+                    "tone": "ok" if dw > 0 else "down"}
+        dr = (top["reps"] or 0) - (last["reps"] or 0)
+        if dr:
+            return {"text": ("▲ " if dr > 0 else "▼ ") + _signed(dr, " reps"),
+                    "tone": "ok" if dr > 0 else "down"}
+    elif kind == "timed":
+        ds = (top["duration"] or 0) - (last["duration"] or 0)
+        if ds:
+            return {"text": ("▲ " if ds > 0 else "▼ ") + _signed(ds, "s"),
+                    "tone": "ok" if ds > 0 else "down"}
+    else:
+        dr = (top["reps"] or 0) - (last["reps"] or 0)
+        if dr:
+            return {"text": ("▲ " if dr > 0 else "▼ ") + _signed(dr, " reps"),
+                    "tone": "ok" if dr > 0 else "down"}
+    return {"text": "= last", "tone": "flat"}
+
+
+def session_summary(rows: list[dict], aliases: dict[str, str], now: datetime,
+                    live_minutes: int = LIVE_SESSION_MINUTES) -> Optional[dict]:
+    """The latest session whose last set is today, shaped for the Log screen.
+
+    Returns None when nothing was logged today.  `live` is true while the last
+    set is newer than `live_minutes`; afterwards the UI collapses the card.
+    """
+    todays = [r for r in rows if r["ts"].date() == now.date()]
+    if not todays:
+        return None
+    last_row = max(todays, key=lambda r: (r["ts"], r["row"]))
+    sid = _sid(last_row)
+    sess = sorted((r for r in rows if _sid(r) == sid), key=lambda r: (r["ts"], r["row"]))
+
+    by_ex: dict[str, list[dict]] = {}
+    for r in rows:
+        by_ex.setdefault(resolve_exercise(r, aliases), []).append(r)
+
+    exercises, order = [], []
+    for r in sess:
+        name = resolve_exercise(r, aliases)
+        if name and name not in order:
+            order.append(name)
+    for name in order:
+        cur = [r for r in sess if resolve_exercise(r, aliases) == name]
+        kind = exercise_kind(by_ex[name])
+        key = _top_key(kind)
+        top = max(cur, key=key)
+        priors = [max(srows, key=key) for s2, srows in _group_sessions(by_ex[name]) if s2 != sid
+                  and max(r["ts"] for r in srows) < min(r["ts"] for r in cur)]
+        is_pr = bool(priors) and key(top) > max(key(t) for t in priors)
+        exercises.append({
+            "name": name,
+            "kind": kind,
+            "assisted": kind == "weighted" and all(r["weight"] < 0 for r in by_ex[name] if r["weight"]),
+            "pr": is_pr,
+            "delta": _delta(top, priors[-1] if priors else None, kind),
+            "sets": [_ui_set(r, is_pr and r is top) for r in cur],
+            "n_sets": sum(r["sets"] for r in cur),
+        })
+
+    start, end = sess[0]["ts"], max(r["ts"] for r in sess)
+    live = (now - end) <= timedelta(minutes=live_minutes)
+    elapsed = (now if live else end) - start
+    return {
+        "session": sid,
+        "live": live,
+        "started": start.strftime("%H:%M"),
+        "last_set": end.strftime("%H:%M"),
+        "elapsed_min": max(0, int(elapsed.total_seconds() // 60)),
+        "n_exercises": len(exercises),
+        "n_sets": sum(e["n_sets"] for e in exercises),
+        "exercises": exercises,
+    }
+
+
+def session_markers(rows: list[dict], aliases: dict[str, str], now: datetime) -> list[dict]:
+    """One timeline marker per session that has a set today: {start, title}."""
+    todays = {_sid(r) for r in rows if r["ts"].date() == now.date()}
+    out = []
+    for sid in sorted(todays):
+        sess = sorted((r for r in rows if _sid(r) == sid), key=lambda r: r["ts"])
+        names = []
+        for r in sess:
+            n = resolve_exercise(r, aliases)
+            if n and n not in names:
+                names.append(n)
+        out.append({"ts": sess[0]["ts"], "title": "Training: " + ", ".join(names)})
+    return sorted(out, key=lambda m: m["ts"])
 
 
 def build_snapshot(rows: list[dict], aliases: dict[str, str], now: datetime) -> str:

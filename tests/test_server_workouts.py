@@ -295,6 +295,42 @@ def test_assisted_negative_weight_round_trip(env):
 
 
 # ---------------------------------------------------------------------------
+# /api/workouts/today (Log-screen session card)
+# ---------------------------------------------------------------------------
+
+def test_workouts_today_empty(env):
+    sh, state, client = env
+    r = client.get("/api/workouts/today", params={"user_id": "ed"})
+    assert r.status_code == 200
+    assert r.json() == {"session": None, "markers": []}
+
+
+def test_workouts_today_after_logging(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    data = client.get("/api/workouts/today", params={"user_id": "ed"}).json()
+    s = data["session"]
+    assert s["live"] is True and s["n_exercises"] == 1 and s["n_sets"] == 3
+    assert s["exercises"][0]["name"] == "Lat Pulldown"
+    assert s["exercises"][0]["sets"] == [{"label": "100×8", "count": 3, "pr": False}]
+    assert s["exercises"][0]["delta"]["tone"] == "new"
+    assert len(data["markers"]) == 1
+    assert data["markers"][0]["title"] == "Training: Lat Pulldown"
+    assert 0 <= data["markers"][0]["pos_pct"] <= 100
+
+
+def test_workouts_today_refreshes_after_new_log(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    assert client.get("/api/workouts/today").json()["session"]["n_sets"] == 3
+    hang = {"workout_action": "log", "entries": [
+        {"exercise": "Dead Hang", "raw": "dead hang", "sets": [{"duration_sec": 40}]}]}
+    chat(client, state, "dead hang 40s", "ok" + directive(hang))
+    s = client.get("/api/workouts/today").json()["session"]       # cache was invalidated by the write
+    assert s["n_exercises"] == 2 and s["n_sets"] == 4
+
+
+# ---------------------------------------------------------------------------
 # Remap
 # ---------------------------------------------------------------------------
 

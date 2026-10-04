@@ -1653,6 +1653,35 @@ async def logs_today(user_id: str = Query(DEFAULT_USER)):
     return {"logs": result, "window": window_info}
 
 
+def _window_pct(day_sched: dict, ts: datetime) -> float:
+    """Position of `ts` along today's eating window, clamped to 0–100 (50 if no
+    window).  Same math as /api/logs/today so workout tiles line up with meals."""
+    try:
+        s = datetime.strptime(day_sched["start"], "%H:%M").time()
+        e = datetime.strptime(day_sched["end"], "%H:%M").time()
+        total = (datetime.combine(ts.date(), e) - datetime.combine(ts.date(), s)).total_seconds()
+        elapsed = (ts - datetime.combine(ts.date(), s)).total_seconds()
+        return max(0.0, min(100.0, elapsed / total * 100)) if total > 0 else 0.0
+    except Exception:
+        return 50.0
+
+
+@app.get("/api/workouts/today")
+async def workouts_today(user_id: str = Query(DEFAULT_USER)):
+    """Latest session today (for the Log-screen card) + timeline markers."""
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    values   = _cached(f"workout_values_{uid}", 600, lambda: _read_workout_values(uid), empty_ttl=30)
+    aliases  = _cached(f"exercise_aliases_{uid}", 600, lambda: _read_exercise_aliases(uid), empty_ttl=30)
+    schedule = _cached(f"schedule_{uid}", 600, lambda: _read_fasting_schedule(uid))
+    now = datetime.now(EASTERN).replace(tzinfo=None)
+    rows = workouts.parse_rows(values) if values else []
+    day_sched = schedule.get(now.strftime("%A"), {"start": None, "end": None})
+    markers = [{"pos_pct": _window_pct(day_sched, m["ts"]), "title": m["title"],
+                "time": m["ts"].strftime("%H:%M")}
+               for m in workouts.session_markers(rows, aliases, now)]
+    return {"session": workouts.session_summary(rows, aliases, now), "markers": markers}
+
+
 @app.get("/api/chat/history")
 async def chat_history(user_id: str = Query(DEFAULT_USER)):
     uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER

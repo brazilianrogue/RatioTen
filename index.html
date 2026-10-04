@@ -146,6 +146,58 @@ body[data-mode="bulk"] {
 .fasting .status-label      { color: var(--blue); }
 .no-schedule .status-label  { color: var(--muted); }
 
+
+/* ── Training session card (Log view) ─────────────────────────────────── */
+#session-card { margin-bottom: 10px; }
+#session-card:empty { display: none; }
+.sess {
+  background: var(--card2); border-radius: var(--radius); overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.sess-h {
+  display: flex; justify-content: space-between; align-items: center; width: 100%;
+  padding: 9px 12px; border: 0; font-family: var(--font); color: inherit; text-align: left;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+button.sess-h { cursor: pointer; }
+.sess-lbl { display: flex; align-items: center; gap: 7px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--accent); }
+.sess-tm { font-size: 1.0rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; }
+.sess-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+@media (prefers-reduced-motion: no-preference) { .sess-dot { animation: tl-pulse 2s ease-in-out infinite; } }
+.sess-ex { padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; gap: 5px; }
+.sess-ex-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sess-ex-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; font-weight: 600; color: #fff; }
+.sess-chips { display: flex; gap: 4px; flex-shrink: 0; }
+.sess-delta { font-size: 0.66rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+.sd-ok   { background: rgba(0,201,122,0.15); color: var(--green); }
+.sd-new, .sd-flat { background: rgba(0,166,255,0.15); color: var(--blue); }
+.sd-down { background: rgba(255,255,255,0.07); color: var(--muted); }
+.sd-pr   { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.sess-sets { display: flex; flex-wrap: wrap; gap: 4px; }
+.sess-set {
+  font-size: 0.74rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px;
+}
+.sess-set small { font-size: 0.64rem; font-weight: 700; color: var(--muted); margin-left: 3px; }
+.sess-set.pr { border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+.sess-f { display: flex; justify-content: space-between; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+.sess-more { padding: 7px 12px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.72rem; color: var(--muted); }
+.sess-line {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  background: var(--card2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 9px 12px; cursor: pointer; font-family: var(--font); font-size: 0.78rem; color: var(--text); text-align: left;
+}
+.sess-line b { color: #fff; font-weight: 600; }
+.sess-line .chev { color: var(--muted); font-size: 0.7rem; }
+.sess-h:focus-visible, .sess-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Timeline workout tile (same stem/marker treatment as meal emoji) */
+.tl-w {
+  width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.tl-w svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; }
+
 /* ── Timeline ─────────────────────────────────────────────────────────── */
 #timeline-wrap { margin: 16px 0; }
 .timeline-bar-outer {
@@ -686,6 +738,8 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
       </div>
     </div>
 
+    <div id="session-card"></div>
+
     <div class="cards-row" id="metric-cards">
       <div class="card">
         <div class="card-label">Calories</div>
@@ -1052,6 +1106,9 @@ const state = {
   chartWow:      null,
   lowestWeight:  null,
   weightHistory: [],
+  workoutSession: null,   // latest session today (from /api/workouts/today)
+  workoutMarkers: [],     // timeline markers for today's sessions
+  sessionExpanded: false, // user expanded a finished session's card
 };
 
 // ── Navigation ─────────────────────────────────────────────────────────────
@@ -1204,10 +1261,15 @@ function updateSwitchProfileLabel() {
 async function loadDashboard() {
   try {
     const uid = getUserId();
-    const [dash, tl] = await Promise.all([
+    const [dash, tl, wk] = await Promise.all([
       fetch(`/api/dashboard?user_id=${uid}`).then(r=>r.json()),
       fetch(`/api/logs/today?user_id=${uid}`).then(r=>r.json()),
+      // Training data is optional: a failure here must never break the nutrition dashboard.
+      fetch(`/api/workouts/today?user_id=${uid}`).then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
+    state.workoutSession = wk ? wk.session : null;
+    state.workoutMarkers = wk ? (wk.markers || []) : [];
+    renderSessionCard();
 
     // Status banner
     const banner = document.getElementById('status-banner');
@@ -1384,14 +1446,20 @@ function buildMarkers(clusters) {
 }
 
 // ── Timeline renderer ──────────────────────────────────────────────────────
+const WORKOUT_TILE = '<span class="tl-w"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg></span>';
+
 function renderTimeline(logs, window, dash) {
   const wrap = document.getElementById('timeline-wrap');
-  if (!window || !window.start || !window.end || logs.length === 0) {
+  // Training sessions ride the same timeline as meals (one tile per session).
+  const workoutPts = (state.workoutMarkers || []).map(m => ({
+    pos_pct: m.pos_pct, emoji: WORKOUT_TILE, item: m.title,
+  }));
+  if (!window || !window.start || !window.end || (logs.length === 0 && workoutPts.length === 0)) {
     wrap.innerHTML = '';
     return;
   }
 
-  const clusters = clusterLogs(logs);
+  const clusters = clusterLogs([...logs, ...workoutPts]);
   const markers  = buildMarkers(clusters);
 
   // Progress marker
@@ -1434,6 +1502,58 @@ function renderTimeline(logs, window, dash) {
       ${progress}
       ${markers}
     </div>`;
+}
+
+// ── Training session card ───────────────────────────────────────────────────
+function fmtClock12(hhmm) {            // "07:05" -> "7:05a"
+  const [h, m] = String(hhmm).split(':').map(Number);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}${h < 12 ? 'a' : 'p'}`;
+}
+function fmtElapsed(min) {             // 42 -> "0:42"
+  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
+}
+const SESSION_MAX_ROWS = 6;
+
+function toggleSessionCard() {
+  state.sessionExpanded = !state.sessionExpanded;
+  renderSessionCard();
+}
+
+function renderSessionCard() {
+  const el = document.getElementById('session-card');
+  const s  = state.workoutSession;
+  if (!s || !s.exercises || s.exercises.length === 0) { el.innerHTML = ''; return; }
+
+  const summary = `${s.n_exercises} exercise${s.n_exercises === 1 ? '' : 's'} · ${s.n_sets} set${s.n_sets === 1 ? '' : 's'}`;
+
+  // Finished session: one tappable line (expand to review it).
+  if (!s.live && !state.sessionExpanded) {
+    el.innerHTML = `<button class="sess-line" onclick="toggleSessionCard()" aria-expanded="false">
+      <span><b>Trained ${fmtClock12(s.started)}</b> · ${summary} · ${fmtElapsed(s.elapsed_min)}</span>
+      <span class="chev" aria-hidden="true">▾</span></button>`;
+    return;
+  }
+
+  const rows = s.exercises.slice(0, SESSION_MAX_ROWS).map(ex => {
+    const chips = (ex.pr ? '<span class="sess-delta sd-pr">PR</span>' : '')
+                + `<span class="sess-delta sd-${esc(ex.delta.tone)}">${esc(ex.delta.text)}</span>`;
+    const sets = ex.sets.map(st =>
+      `<span class="sess-set${st.pr ? ' pr' : ''}">${esc(st.label)}${st.count > 1 ? `<small>×${st.count}</small>` : ''}</span>`
+    ).join('');
+    return `<div class="sess-ex">
+      <div class="sess-ex-top"><span class="sess-ex-name">${esc(ex.name)}</span><span class="sess-chips">${chips}</span></div>
+      <div class="sess-sets">${sets}</div></div>`;
+  }).join('');
+  const more = s.exercises.length > SESSION_MAX_ROWS
+    ? `<div class="sess-more">+${s.exercises.length - SESSION_MAX_ROWS} more exercises</div>` : '';
+
+  const label = s.live ? '<i class="sess-dot" aria-hidden="true"></i>Training session' : 'Session';
+  const head  = s.live
+    ? `<div class="sess-h"><span class="sess-lbl">${label}</span><span class="sess-tm">${fmtElapsed(s.elapsed_min)}</span></div>`
+    : `<button class="sess-h" onclick="toggleSessionCard()" aria-expanded="true"><span class="sess-lbl">${label}</span><span class="sess-tm">${fmtElapsed(s.elapsed_min)}</span></button>`;
+
+  el.innerHTML = `<div class="sess">${head}${rows}${more}
+    <div class="sess-f"><span>${summary}</span><span>Started ${fmtClock12(s.started)}</span></div></div>`;
 }
 
 // ── Log Manager Bottom Sheet ──────────────────────────────────────────────
@@ -1631,7 +1751,7 @@ async function submitChat() {
             scrollChat();
           } else if (evt.done) {
             // Refresh dashboard totals after logging
-            if (evt.logged && evt.logged.length > 0) {
+            if ((evt.logged && evt.logged.length > 0) || evt.workout) {
               loadDashboard();
             }
           } else if (evt.error) {

@@ -147,3 +147,4 @@ WORKOUT_HEADERS = ["Timestamp", "Session ID", "Entry ID", "Exercise", "Raw Input
 ALIAS_HEADERS = ["Alias", "Exercise", "Added"]
 SESSION_GAP_HOURS = 3          # a gap longer than this between sets starts a new session
 WORKING_WEIGHT_SESSIONS = 3    # working weight = avg top set over this many recent sessions
+LIVE_SESSION_MINUTES = 45      # UI: a session with no set for this long shows as finished (collapsed)

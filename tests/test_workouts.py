@@ -267,6 +267,104 @@ def test_snapshot_empty():
 
 
 # ---------------------------------------------------------------------------
+# Session summary (Log-screen card)
+# ---------------------------------------------------------------------------
+
+def today_at(h, m=0):
+    return NOW.replace(hour=h, minute=m).strftime(w.TS_FMT)
+
+
+def summary_rows():
+    # NOW is 18:00.  Prior sessions: 100×8 (d-9) and 100×8 (d-2).  Today: PR 110×6.
+    return w.parse_rows(sheet([
+        (ts(9), "S-1", "E-1", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3),
+        (ts(2), "S-2", "E-2", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3),
+        (ts(2, minute=30), "S-2", "E-3", "Assisted Dip", "assisted dips", -55, 8, "", 3),
+        (today_at(17, 0), "S-3", "E-4", "Lat Pulldown", "lat pulldowns", 100, 8, "", 2),
+        (today_at(17, 10), "S-3", "E-4", "Lat Pulldown", "lat pulldowns", 110, 6, "", 1),
+        (today_at(17, 20), "S-3", "E-5", "Assisted Dip", "assisted dips", -50, 8, "", 1),
+        (today_at(17, 21), "S-3", "E-5", "Assisted Dip", "assisted dips", -45, 8, "", 1),
+        (today_at(17, 30), "S-3", "E-6", "Dead Hang", "dead hang", "", "", 40, 1),
+    ]))
+
+
+def test_session_summary_none_when_nothing_today():
+    rows = w.parse_rows(sheet([(ts(2), "S-2", "E-2", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3)]))
+    assert w.session_summary(rows, {}, NOW) is None
+    assert w.session_summary([], {}, NOW) is None
+
+
+def test_session_summary_live_card():
+    s = w.session_summary(summary_rows(), {}, NOW)
+    assert s["session"] == "S-3" and s["live"] is True        # last set 17:30, now 18:00
+    assert s["started"] == "17:00" and s["last_set"] == "17:30"
+    assert s["elapsed_min"] == 60                              # live: start → now
+    assert (s["n_exercises"], s["n_sets"]) == (3, 6)
+    names = [e["name"] for e in s["exercises"]]
+    assert names == ["Lat Pulldown", "Assisted Dip", "Dead Hang"]   # order of first set
+
+
+def test_session_summary_pr_and_delta():
+    ex = {e["name"]: e for e in w.session_summary(summary_rows(), {}, NOW)["exercises"]}
+    lat = ex["Lat Pulldown"]
+    assert lat["pr"] is True
+    assert lat["delta"] == {"text": "▲ 10 lb", "tone": "ok"}
+    assert lat["sets"] == [{"label": "100×8", "count": 2, "pr": False},
+                           {"label": "110×6", "count": 1, "pr": True}]
+
+
+def test_session_summary_assisted_less_assistance_is_improvement():
+    dip = {e["name"]: e for e in w.session_summary(summary_rows(), {}, NOW)["exercises"]}["Assisted Dip"]
+    assert dip["assisted"] is True and dip["pr"] is True
+    # top set -45 (least assistance today) vs -55 last time: 10 lb less assistance
+    assert dip["delta"] == {"text": "▼ 10 lb assist", "tone": "ok"}
+    assert [s["label"] for s in dip["sets"]] == ["50 assist ×8", "45 assist ×8"]
+
+
+def test_session_summary_new_exercise_has_no_pr():
+    hang = {e["name"]: e for e in w.session_summary(summary_rows(), {}, NOW)["exercises"]}["Dead Hang"]
+    assert hang["pr"] is False
+    assert hang["delta"] == {"text": "New", "tone": "new"}
+    assert hang["sets"][0]["label"] == "40s"
+
+
+def test_session_summary_ended_after_live_window():
+    later = NOW + timedelta(minutes=50)                         # 18:50, last set 17:30 → 80 min ago
+    s = w.session_summary(summary_rows(), {}, later)
+    assert s["live"] is False
+    assert s["elapsed_min"] == 30                               # frozen: start → last set
+
+
+def test_session_summary_same_and_lower_deltas():
+    rows = w.parse_rows(sheet([
+        (ts(3), "S-1", "E-1", "Squat", "squat", 185, 5, "", 1),
+        (ts(3, minute=5), "S-1", "E-1", "Push-up", "pushups", "", 20, "", 1),
+        (today_at(17), "S-2", "E-2", "Squat", "squat", 185, 5, "", 1),
+        (today_at(17, 5), "S-2", "E-2", "Push-up", "pushups", "", 15, "", 1),
+    ]))
+    ex = {e["name"]: e for e in w.session_summary(rows, {}, NOW)["exercises"]}
+    assert ex["Squat"]["delta"] == {"text": "= last", "tone": "flat"}
+    assert ex["Squat"]["pr"] is False                           # equal, not beaten
+    assert ex["Push-up"]["delta"] == {"text": "▼ 5 reps", "tone": "down"}
+
+
+def test_session_summary_groups_by_alias():
+    rows = w.parse_rows(sheet([
+        (ts(3), "S-1", "E-1", "Cable Pulldown", "cable pulldown", 90, 8, "", 1),
+        (today_at(17), "S-2", "E-2", "Lat Pulldown", "lat pulldowns", 100, 8, "", 1),
+    ]))
+    aliases = {"cable pulldown": "Lat Pulldown", "lat pulldowns": "Lat Pulldown"}
+    ex = w.session_summary(rows, aliases, NOW)["exercises"][0]
+    assert ex["delta"] == {"text": "▲ 10 lb", "tone": "ok"}    # compared against the aliased history
+
+
+def test_session_markers():
+    m = w.session_markers(summary_rows(), {}, NOW)
+    assert len(m) == 1 and m[0]["title"] == "Training: Lat Pulldown, Assisted Dip, Dead Hang"
+    assert m[0]["ts"] == datetime(2026, 10, 2, 17, 0)
+
+
+# ---------------------------------------------------------------------------
 # Intent detection
 # ---------------------------------------------------------------------------
 
