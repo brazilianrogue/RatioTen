@@ -147,6 +147,92 @@ body[data-mode="bulk"] {
 .no-schedule .status-label  { color: var(--muted); }
 
 
+
+/* ── Narrow-screen nav: four tabs must fit a 375px header ─────────────── */
+@media (max-width: 430px) {
+  .nav-inner { padding: 0 10px; }
+  .brand { gap: 6px; font-size: 17px; }
+  .brand svg { width: 32px; height: 32px; }
+  .nav-tabs { gap: 2px; }
+  .tab-btn { padding: 6px 6px; min-width: 50px; }
+}
+
+/* ── Train tab ────────────────────────────────────────────────────────── */
+.week {
+  background: var(--card2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 11px 13px; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 4px;
+}
+.week-l { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.week-v { font-size: 1.15rem; font-weight: 700; color: #fff; margin: 1px 0 4px; }
+.days { display: grid; grid-template-columns: repeat(7, 22px); gap: 4px; text-align: center; flex-shrink: 0; }
+.days span { font-size: 0.62rem; color: var(--muted); font-weight: 700; }
+.days b { display: block; width: 22px; height: 22px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); }
+.days b.on { background: color-mix(in srgb, var(--accent) 70%, transparent); border-color: transparent; }
+.days b.today { border-color: var(--accent); }
+#train-list { display: flex; flex-direction: column; gap: 8px; }
+.ex-card {
+  display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 4px 12px; align-items: center; width: 100%;
+  background: var(--card2); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px;
+  font-family: var(--font); color: var(--text); text-align: left; cursor: pointer;
+}
+.ex-card:active { opacity: .75; }
+.ex-card:focus-visible, .sess-ex:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ex-n { font-size: 0.92rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ex-n span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-n em { font-style: normal; flex-shrink: 0; font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; padding: 0 4px; }
+.ex-w { font-size: 1.35rem; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+.ex-w small { font-size: 0.72rem; color: var(--muted); font-weight: 600; margin-left: 4px; }
+.spark { grid-column: 2; grid-row: 1 / 3; width: 76px; height: 34px; }
+.ex-m { grid-column: 1 / -1; font-size: 0.72rem; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+.ex-m b { color: var(--text); font-weight: 600; }
+.train-empty { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 40px 18px; line-height: 1.6; }
+.train-empty code { color: var(--text); font-family: var(--font); font-weight: 600; }
+.sess-ex[data-name] { cursor: pointer; }
+.sess-ex[data-name]:active { background: rgba(255,255,255,0.03); }
+
+/* Exercise detail sheet (same pattern as the Stats driver sheet) */
+#ex-sheet-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1100; opacity:0; pointer-events:none; transition:opacity 0.22s ease; }
+#ex-sheet-backdrop.open { opacity:1; pointer-events:auto; }
+#ex-sheet { position:fixed; left:0; right:0; bottom:0; z-index:1101; background:var(--card2); border-top:1px solid var(--border); border-radius:18px 18px 0 0; padding:0 18px 30px; transform:translateY(100%); transition:transform 0.28s cubic-bezier(0.32,0.72,0,1); max-height:88vh; overflow-y:auto; }
+#ex-sheet.open { transform:translateY(0); }
+.ex-sheet-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ex-sheet-title { font-size: 1.15rem; font-weight: 700; color: #fff; }
+.ex-sheet-sub { font-size: 0.74rem; color: var(--muted); margin-top: 2px; }
+.ex-sheet-close { background: none; border: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; padding: 2px 4px; line-height: 1; }
+.ex-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0 12px; }
+.ex-stats > div { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+.ex-stats .l { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.ex-stats .v { font-size: 0.95rem; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; margin-top: 1px; line-height: 1.2; overflow-wrap: anywhere; }
+.ex-stats .v.pr { color: var(--accent); }
+.ex-stats .d { font-size: 0.62rem; color: var(--muted); }
+.ex-chart { width: 100%; height: auto; display: block; margin-bottom: 2px; }
+.ex-chart text { fill: var(--muted); font-size: 9px; font-family: var(--font); }
+.ex-chart .wk-lbl { text-anchor: end; }
+.ex-chart-empty { color: var(--muted); font-size: 0.8rem; text-align: center; padding: 26px 0; }
+.ex-chart-note { font-size: 0.66rem; color: var(--muted); text-align: center; margin-bottom: 8px; }
+.ex-hist { margin: 10px 0 14px; }
+.ex-hist > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; padding: 7px 0; border-top: 1px solid rgba(255,255,255,0.05); align-items: center; }
+.ex-hist-d { font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ex-sec { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.ex-alias { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.74rem; color: var(--muted); }
+.ex-alias .a { border: 1px dashed rgba(255,255,255,0.2); border-radius: 12px; padding: 2px 9px; color: var(--text); }
+.ex-alias button { margin-left: auto; background: none; border: 0; color: var(--blue); font: 600 0.78rem var(--font); cursor: pointer; padding: 4px 2px; }
+.ex-edit { margin-top: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; display: none; flex-direction: column; gap: 8px; }
+.ex-edit.open { display: flex; }
+.ex-edit label { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.ex-edit-row { display: flex; gap: 8px; }
+.ex-edit input, .ex-edit select {
+  flex: 1; min-width: 0; height: 38px; background: var(--card); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+  color: #fff; padding: 0 10px; font: 0.88rem var(--font); outline: none;
+}
+.ex-edit input:focus, .ex-edit select:focus { border-color: rgba(255,255,255,0.3); }
+.ex-edit button.go { flex-shrink: 0; height: 38px; padding: 0 14px; background: var(--blue); color: #fff; border: 0; border-radius: 8px; font: 600 0.82rem var(--font); cursor: pointer; }
+.ex-edit button.go:disabled { opacity: .4; cursor: default; }
+.ex-edit-hint { font-size: 0.7rem; color: var(--muted); line-height: 1.45; }
+.ex-edit-msg { font-size: 0.76rem; min-height: 1em; }
+.ex-edit-msg.err { color: var(--red); }
+.ex-edit-msg.ok  { color: var(--green); }
+
 /* ── Training session card (Log view) ─────────────────────────────────── */
 #session-card { margin-bottom: 10px; }
 #session-card:empty { display: none; }
@@ -700,6 +786,10 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         Log
       </button>
+      <button class="tab-btn" data-view="train" onclick="switchView('train')">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>
+        Train
+      </button>
       <button class="tab-btn" data-view="analyze" onclick="switchView('analyze')">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
         Stats
@@ -766,6 +856,11 @@ canvas.chart { width:100% !important; margin-bottom:16px; }
     </div>
     <div id="chat-list"></div>
     <div id="chat-empty">No messages yet — describe a meal to get started.</div>
+  </div>
+
+  <!-- TRAIN VIEW -->
+  <div id="view-train" class="view">
+    <div id="train-body"><div class="train-empty">Loading…</div></div>
   </div>
 
   <!-- ANALYZE VIEW -->
@@ -1125,6 +1220,7 @@ function switchView(name) {
   } else {
     bar.classList.remove('visible');
   }
+  if (name === 'train') loadTrain();
   if (name === 'analyze') loadAnalyze();
   if (name === 'plan' && !state.planLoaded) loadPlan();
 }
@@ -1540,7 +1636,7 @@ function renderSessionCard() {
     const sets = ex.sets.map(st =>
       `<span class="sess-set${st.pr ? ' pr' : ''}">${esc(st.label)}${st.count > 1 ? `<small>×${st.count}</small>` : ''}</span>`
     ).join('');
-    return `<div class="sess-ex">
+    return `<div class="sess-ex" data-name="${esc(ex.name)}" role="button" tabindex="0" aria-label="${esc(ex.name)} details">
       <div class="sess-ex-top"><span class="sess-ex-name">${esc(ex.name)}</span><span class="sess-chips">${chips}</span></div>
       <div class="sess-sets">${sets}</div></div>`;
   }).join('');
@@ -1754,6 +1850,7 @@ async function submitChat() {
             if ((evt.logged && evt.logged.length > 0) || evt.workout) {
               loadDashboard();
             }
+            if (evt.workout) TRAIN.data = null;   // Train tab reloads fresh next time it opens
           } else if (evt.error) {
             assistantBub.innerHTML = `<em style="color:var(--red)">Error: ${esc(evt.error)}</em>`;
           }
@@ -1763,6 +1860,290 @@ async function submitChat() {
   } catch(e) {
     assistantBub.innerHTML = `<em style="color:var(--red)">Network error. Please try again.</em>`;
   }
+}
+
+// ── Train tab + exercise detail sheet ───────────────────────────────────────
+const TRAIN = { data: null };
+const EX = { name: null, data: null };
+
+function fmtDay(iso, today, cap) {
+  if (!iso) return '';
+  if (iso === today) return cap ? 'Today' : 'today';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function trendColor(ex) {
+  return ex.assisted ? 'var(--green)' : ex.kind === 'weighted' ? 'var(--accent)' : 'var(--blue)';
+}
+function setChips(sets) {
+  return sets.map(st =>
+    `<span class="sess-set${st.pr ? ' pr' : ''}">${esc(st.label)}${st.count > 1 ? `<small>×${st.count}</small>` : ''}</span>`
+  ).join('');
+}
+
+function sparkSvg(values, color) {
+  const W = 76, H = 34, P = 4;
+  if (!values.length) return '';
+  const min = Math.min(...values), max = Math.max(...values);
+  const x = i => values.length === 1 ? W / 2 : P + i * (W - 2 * P) / (values.length - 1);
+  const y = v => max === min ? H / 2 : H - P - (v - min) / (max - min) * (H - 2 * P);
+  const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+  const last = pts[pts.length - 1].split(',');
+  const line = values.length > 1
+    ? `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>` : '';
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true">${line}<circle cx="${last[0]}" cy="${last[1]}" r="2.6" fill="${color}"/></svg>`;
+}
+
+async function loadTrain() {
+  const body = document.getElementById('train-body');
+  if (!TRAIN.data) body.innerHTML = '<div class="train-empty">Loading…</div>';
+  try {
+    const r = await fetch(`/api/workouts/summary?user_id=${getUserId()}`);
+    if (!r.ok) throw new Error('bad status');
+    TRAIN.data = await r.json();
+    renderTrain();
+  } catch (e) {
+    if (!TRAIN.data) body.innerHTML = '<div class="train-empty">Could not load training data. Pull to retry by switching tabs.</div>';
+  }
+}
+
+function renderTrain() {
+  const d = TRAIN.data, body = document.getElementById('train-body');
+  if (!d) return;
+  const wk = d.week, diff = wk.sessions - wk.last_week;
+  const delta = diff > 0 ? `<span class="sess-delta sd-ok">▲ ${diff} vs last wk</span>`
+              : diff < 0 ? `<span class="sess-delta sd-down">▼ ${-diff} vs last wk</span>`
+              : `<span class="sess-delta sd-flat">= last wk</span>`;
+  const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(l => `<span>${l}</span>`).join('');
+  const boxes = wk.days.map((on, i) => `<b class="${on ? 'on' : ''}${i === wk.today_idx ? ' today' : ''}"></b>`).join('');
+  const trained = wk.days.filter(Boolean).length;
+  const weekCard = `<div class="week">
+      <div><div class="week-l">This week</div>
+        <div class="week-v">${wk.sessions} session${wk.sessions === 1 ? '' : 's'}</div>${delta}</div>
+      <div class="days" role="img" aria-label="Trained on ${trained} day${trained === 1 ? '' : 's'} this week">${letters}${boxes}</div>
+    </div>`;
+
+  if (d.exercises.length === 0) {
+    body.innerHTML = weekCard + `<div class="train-empty">No workouts yet.<br>Log a set in the Coach chat, like <code>lat pulldowns 100 x 8 x 3</code>.</div>`;
+    return;
+  }
+  const cards = d.exercises.map(ex => {
+    const tag = ex.assisted ? '<em>assist</em>' : ex.kind === 'timed' ? '<em>timed</em>' : ex.kind === 'bodyweight' ? '<em>bodyweight</em>' : '';
+    return `<button type="button" class="ex-card" data-name="${esc(ex.name)}">
+      <div><div class="ex-n"><span>${esc(ex.name)}</span>${tag}</div>
+        <div class="ex-w">${esc(ex.big.value)}<small>${esc(ex.big.unit)}</small></div></div>
+      ${sparkSvg(ex.spark, trendColor(ex))}
+      <div class="ex-m"><span>PR <b>${esc(ex.pr)}</b> · ${esc(fmtDay(ex.pr_date, d.today))}</span>
+        <span>Last <b>${esc(ex.last)}</b> · ${esc(fmtDay(ex.last_date, d.today))}</span></div>
+    </button>`;
+  }).join('');
+  body.innerHTML = weekCard
+    + `<div class="section-hdr"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>Exercises · last trained</div>`
+    + `<div id="train-list">${cards}</div>`;
+}
+
+document.getElementById('train-body').addEventListener('click', e => {
+  const card = e.target.closest('.ex-card[data-name]');
+  if (card) openExerciseSheet(card.dataset.name);
+});
+
+// Tap an exercise on the Log screen's session card
+function _sessionRowOpen(e) {
+  if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest('.sess-ex[data-name]');
+  if (!row) return;
+  e.preventDefault();
+  openExerciseSheet(row.dataset.name);
+}
+document.getElementById('session-card').addEventListener('click', _sessionRowOpen);
+document.getElementById('session-card').addEventListener('keydown', _sessionRowOpen);
+
+// ── Detail sheet ───────────────────────────────────────────────────────────
+function closeExerciseSheet() {
+  document.getElementById('ex-sheet-backdrop').classList.remove('open');
+  document.getElementById('ex-sheet').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeExerciseSheet(); });
+
+async function openExerciseSheet(name) {
+  EX.name = name; EX.data = null;
+  const body = document.getElementById('ex-sheet-body');
+  body.innerHTML = '<div class="train-empty">Loading…</div>';
+  document.getElementById('ex-sheet-backdrop').classList.add('open');
+  document.getElementById('ex-sheet').classList.add('open');
+  await refreshExerciseSheet();
+}
+
+async function refreshExerciseSheet() {
+  const body = document.getElementById('ex-sheet-body');
+  try {
+    const r = await fetch(`/api/workouts/exercise?name=${encodeURIComponent(EX.name)}&user_id=${getUserId()}`);
+    if (r.status === 404) { closeExerciseSheet(); return false; }
+    if (!r.ok) throw new Error('bad status');
+    EX.data = await r.json();
+    renderExerciseSheet();
+    return true;
+  } catch (e) {
+    body.innerHTML = `<div class="train-empty">Could not load this exercise.</div>
+      <div style="text-align:center"><button class="ex-sheet-close" onclick="closeExerciseSheet()" style="font-size:.85rem">Close</button></div>`;
+    return false;
+  }
+}
+
+function chartSvg(d) {
+  const sr = d.series;
+  if (sr.length < 2) {
+    return `<div class="ex-chart-empty">${sr.length ? 'The chart appears after your second session.' : 'No sets logged yet.'}</div>`;
+  }
+  const color = trendColor(d);
+  const vals = sr.map(p => p.value);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (d.working != null) { lo = Math.min(lo, d.working); hi = Math.max(hi, d.working); }
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+  const L = 36, R = 292, T = 10, B = 108;
+  const x = i => L + i * (R - L) / (sr.length - 1);
+  const y = v => B - (v - lo) / (hi - lo) * (B - T);
+  const tick = v => {
+    const a = d.assisted ? Math.abs(v) : v;
+    const r = (hi - lo) < 8 ? Math.round(a * 10) / 10 : Math.round(a);
+    return d.kind === 'timed' ? r + 's' : String(r);
+  };
+  // Round gridlines (1/2/5 × 10^k) so the axis reads 80, 90, 100 instead of 76, 89, 101
+  const rough = (hi - lo) / 3, mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(st => (hi - lo) / st <= 6) || rough;
+  let grid = '', labels = '';
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+    const yy = y(v).toFixed(1);
+    grid   += `<line x1="${L}" x2="${R + 2}" y1="${yy}" y2="${yy}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+    labels += `<text x="${L - 6}" y="${(+yy + 3).toFixed(1)}" text-anchor="end">${tick(v)}</text>`;
+  }
+  const pts  = sr.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`);
+  const area = `M${pts[0]} L${pts.slice(1).join(' L')} L${R},${B} L${L},${B} Z`;
+  const dots = sr.map((p, i) => {
+    const last = i === sr.length - 1;
+    return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${last ? 4 : p.pr ? 3.2 : 2.5}" fill="${last || p.pr ? color : 'var(--card2)'}" stroke="${color}" stroke-width="1.5"/>`;
+  }).join('');
+  let working = '';
+  if (d.kind === 'weighted' && d.working != null) {
+    const wy = y(d.working).toFixed(1);
+    working = `<line x1="${L}" x2="${R}" y1="${wy}" y2="${wy}" stroke="var(--blue)" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`
+            + `<text class="wk-lbl" x="${R}" y="${(+wy - 4).toFixed(1)}" style="fill:var(--blue)">working ${esc(d.big.value)}</text>`;
+  }
+  const xl = (i, anchor) => `<text x="${x(i).toFixed(1)}" y="124" text-anchor="${anchor}">${esc(fmtDay(sr[i].date, d.today, true))}</text>`;
+  const xLabels = xl(0, 'start') + (sr.length >= 5 ? xl(Math.floor((sr.length - 1) / 2), 'middle') : '') + xl(sr.length - 1, 'end');
+  const aria = `Top set per session across ${sr.length} sessions, from ${sr[0].label} to ${sr[sr.length - 1].label}`;
+  return `<svg class="ex-chart" viewBox="0 0 300 130" role="img" aria-label="${esc(aria)}">
+    ${grid}${labels}${working}
+    <path d="${area}" fill="${color}" opacity=".1"/>
+    <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}${xLabels}</svg>`
+    + (d.assisted ? '<div class="ex-chart-note">Assistance in lb. Higher on the chart means less assistance.</div>' : '');
+}
+
+function renderExerciseSheet() {
+  const d = EX.data, body = document.getElementById('ex-sheet-body');
+  const sub = d.n_sessions
+    ? `${d.n_sessions} session${d.n_sessions === 1 ? '' : 's'} since ${fmtDay(d.first_date, d.today)} · last trained ${fmtDay(d.last_date, d.today)}`
+    : 'No sets logged yet';
+  const workLbl = d.kind === 'weighted' ? (d.assisted ? 'Working assist' : 'Working') : 'Best';
+  const workVal = d.kind === 'weighted' ? `${d.big.value} lb` : d.kind === 'bodyweight' ? `${d.big.value} reps` : d.big.value;
+  const lastTop = d.series.length ? d.series[d.series.length - 1].label : '—';
+  const stats = `<div class="ex-stats">
+      <div><div class="l">${workLbl}</div><div class="v">${esc(workVal)}</div></div>
+      <div><div class="l">PR</div><div class="v pr">${esc(d.pr || '—')}</div><div class="d">${esc(fmtDay(d.pr_date, d.today, true))}</div></div>
+      <div><div class="l">Last</div><div class="v">${esc(lastTop)}</div><div class="d">${esc(fmtDay(d.last_date, d.today, true))}</div></div>
+    </div>`;
+  const hist = d.history.length
+    ? `<div class="ex-hist">${d.history.map(h =>
+        `<div><span class="ex-hist-d">${esc(fmtDay(h.date, d.today, true))}</span><span class="sess-sets">${setChips(h.sets)}</span></div>`).join('')}</div>`
+    : '';
+  const aliasChips = d.aliases.map(a => `<span class="a">${esc(a)}</span>`).join('');
+  const aliasOpts = d.aliases.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  const names = d.exercises.filter(n => n !== d.name).map(n => `<option value="${esc(n)}"></option>`).join('');
+
+  body.innerHTML = `
+    <div class="ex-sheet-top">
+      <div><div class="ex-sheet-title">${esc(d.name)}</div><div class="ex-sheet-sub">${esc(sub)}</div></div>
+      <button class="ex-sheet-close" onclick="closeExerciseSheet()" aria-label="Close">✕</button>
+    </div>
+    ${stats}${chartSvg(d)}${hist}
+    <div class="ex-alias"><span class="ex-sec">Also logged as</span>${aliasChips || '<span>—</span>'}
+      <button type="button" id="ex-edit-toggle" onclick="toggleExerciseEdit()" aria-expanded="false">Edit</button></div>
+    <div class="ex-edit" id="ex-edit">
+      <label for="ex-rename-input">Rename exercise</label>
+      <div class="ex-edit-row">
+        <input id="ex-rename-input" type="text" maxlength="60" value="${esc(d.name)}" autocomplete="off">
+        <button type="button" class="go" onclick="submitExerciseRename()">Rename</button>
+      </div>
+      <label for="ex-move-alias">Move a phrase to another exercise</label>
+      <div class="ex-edit-row"><select id="ex-move-alias">${aliasOpts}</select></div>
+      <div class="ex-edit-row">
+        <input id="ex-move-target" type="text" maxlength="60" list="ex-names" placeholder="Exercise name" autocomplete="off">
+        <datalist id="ex-names">${names}</datalist>
+        <button type="button" class="go" onclick="submitExerciseMove()">Move</button>
+      </div>
+      <div class="ex-edit-hint">Changes apply to your past logs as well as future ones typed that way. A new name starts a new exercise; an existing name merges into it.</div>
+      <div class="ex-edit-msg" id="ex-edit-msg" role="status"></div>
+    </div>`;
+}
+
+function toggleExerciseEdit() {
+  const panel = document.getElementById('ex-edit'), btn = document.getElementById('ex-edit-toggle');
+  const open = panel.classList.toggle('open');
+  btn.setAttribute('aria-expanded', String(open));
+  btn.textContent = open ? 'Done' : 'Edit';
+  if (open) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function _editMsg(text, kind) {
+  const el = document.getElementById('ex-edit-msg');
+  if (el) { el.textContent = text; el.className = 'ex-edit-msg' + (kind ? ' ' + kind : ''); }
+}
+
+async function _exerciseEdit(url, payload, nextName) {
+  const btns = document.querySelectorAll('#ex-edit .go');
+  btns.forEach(b => b.disabled = true);
+  _editMsg('Saving…');
+  try {
+    const r = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, user_id: getUserId() }),
+    });
+    if (!r.ok) {
+      let msg = 'Could not save. Try again.';
+      try { const j = await r.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (_) {}
+      _editMsg(msg, 'err');
+      btns.forEach(b => b.disabled = false);
+      return;
+    }
+    const res = await r.json();
+    EX.name = nextName(res);
+    // The edit changes names everywhere: refresh the list and the Log card too.
+    loadTrain();
+    loadDashboard();
+    const still = await refreshExerciseSheet();
+    if (still) {
+      toggleExerciseEdit();               // reopen the (re-rendered, closed) panel to show the result
+      _editMsg('Saved. Your past logs were updated too.', 'ok');
+    }
+  } catch (e) {
+    _editMsg('Network error. Try again.', 'err');
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+function submitExerciseRename() {
+  const v = document.getElementById('ex-rename-input').value.trim();
+  if (!v) { _editMsg('Enter a name first.', 'err'); return; }
+  _exerciseEdit('/api/workouts/rename', { exercise: EX.data.name, new_name: v }, res => res.exercise);
+}
+
+function submitExerciseMove() {
+  const alias  = document.getElementById('ex-move-alias').value;
+  const target = document.getElementById('ex-move-target').value.trim();
+  if (!alias)  { _editMsg('This exercise has no phrases to move.', 'err'); return; }
+  if (!target) { _editMsg('Enter the exercise to move it to.', 'err'); return; }
+  _exerciseEdit('/api/workouts/remap', { alias, exercise: target }, () => EX.data.name);
 }
 
 // ── Analyze view ───────────────────────────────────────────────────────────
@@ -2857,6 +3238,13 @@ function showMsg(id, msg, color) {
   }).catch(()=>{});
 })();
 </script>
+<!-- Exercise detail sheet -->
+<div id="ex-sheet-backdrop" onclick="closeExerciseSheet()"></div>
+<div id="ex-sheet" role="dialog" aria-modal="true" aria-label="Exercise detail">
+  <div class="driver-sheet-handle" style="margin-bottom:12px"></div>
+  <div id="ex-sheet-body"></div>
+</div>
+
 <!-- Log Manager Bottom Sheet -->
 <div class="log-sheet-overlay" id="log-sheet-overlay" onclick="closeLogSheet()"></div>
 <div id="log-sheet" role="dialog" aria-modal="true" aria-label="Today's Log">

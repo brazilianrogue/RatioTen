@@ -472,6 +472,158 @@ def session_markers(rows: list[dict], aliases: dict[str, str], now: datetime) ->
     return sorted(out, key=lambda m: m["ts"])
 
 
+# ---------------------------------------------------------------------------
+# Train tab: weekly summary, exercise list, exercise detail
+# ---------------------------------------------------------------------------
+
+SPARK_SESSIONS = 8      # points in a list-card sparkline
+DETAIL_SESSIONS = 30    # points in the detail chart
+HISTORY_SESSIONS = 8    # sessions listed under the chart
+
+
+def _metric(row: dict, kind: str) -> float:
+    """The number a session's top set is plotted by (up is always better)."""
+    if kind == "weighted":
+        return row["weight"] or 0
+    if kind == "timed":
+        return row["duration"] or 0
+    return row["reps"] or 0
+
+
+def _top_label(row: dict) -> str:
+    return _ui_set(row, False)["label"]
+
+
+def _big_number(kind: str, assisted: bool, working: Optional[float], best_row: dict) -> dict:
+    """Headline figure for an exercise card / sheet."""
+    if kind == "weighted" and working is not None:
+        return {"value": _fmt_num(round(abs(working), 1)),
+                "unit": "lb assist" if assisted else "lb working"}
+    if kind == "timed":
+        return {"value": _fmt_dur(best_row["duration"] or 0), "unit": "best"}
+    if kind == "bodyweight":
+        return {"value": str(best_row["reps"] or 0), "unit": "reps best"}
+    return {"value": "—", "unit": ""}
+
+
+def _exercise_sessions(ex_rows: list[dict], kind: str) -> list[dict]:
+    """One dict per session, oldest first: top set, plotted value, PR flag."""
+    key = _top_key(kind)
+    out, best = [], None
+    for sid, srows in _group_sessions(ex_rows):
+        top = max(srows, key=key)
+        is_pr = best is not None and key(top) > best
+        best = key(top) if best is None else max(best, key(top))
+        out.append({"sid": sid, "rows": srows, "top": top, "value": _metric(top, kind),
+                    "date": srows[0]["ts"].strftime("%Y-%m-%d"), "pr": is_pr})
+    return out
+
+
+def _ex_common(name: str, ex_rows: list[dict], n_sessions: int = WORKING_WEIGHT_SESSIONS) -> dict:
+    kind = exercise_kind(ex_rows)
+    assisted = kind == "weighted" and all(r["weight"] < 0 for r in ex_rows if r["weight"])
+    sessions = _exercise_sessions(ex_rows, kind)
+    working = None
+    if kind == "weighted":
+        ws = [s["top"]["weight"] for s in sessions if s["top"]["weight"]][-n_sessions:]
+        working = sum(ws) / len(ws) if ws else None
+    key = _top_key(kind)
+    best = max(sessions, key=lambda s: key(s["top"]))
+    return {"kind": kind, "assisted": assisted, "sessions": sessions, "working": working, "best": best,
+            "big": _big_number(kind, assisted, working, best["top"])}
+
+
+def _week_start(now: datetime) -> datetime:
+    return (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def train_summary(rows: list[dict], aliases: dict[str, str], now: datetime) -> dict:
+    """Everything the Train tab list needs in one payload."""
+    monday = _week_start(now)
+    starts = {}
+    for r in rows:
+        sid = _sid(r)
+        starts[sid] = min(starts.get(sid, r["ts"]), r["ts"])
+    this_week = [t for t in starts.values() if monday <= t < monday + timedelta(days=7)]
+    last_week = [t for t in starts.values() if monday - timedelta(days=7) <= t < monday]
+    days = [any(t.date() == (monday + timedelta(days=i)).date() for t in this_week) for i in range(7)]
+
+    grouped: dict[str, list[dict]] = {}
+    for r in rows:
+        grouped.setdefault(resolve_exercise(r, aliases), []).append(r)
+    grouped.pop("", None)
+
+    exercises = []
+    for name, ex_rows in grouped.items():
+        c = _ex_common(name, ex_rows)
+        sessions, latest = c["sessions"], c["sessions"][-1]
+        exercises.append({
+            "name": name, "kind": c["kind"], "assisted": c["assisted"], "big": c["big"],
+            "spark": [s["value"] for s in sessions][-SPARK_SESSIONS:],
+            "pr": _top_label(c["best"]["top"]), "pr_date": c["best"]["date"],
+            "last": _top_label(latest["top"]), "last_date": latest["date"],
+            "n_sessions": len(sessions),
+            "last_ts": max(r["ts"] for r in ex_rows),
+        })
+    exercises.sort(key=lambda e: e["last_ts"], reverse=True)
+    for e in exercises:
+        e["last_ts"] = e["last_ts"].strftime(TS_FMT)
+    return {
+        "today": now.strftime("%Y-%m-%d"),
+        "week": {"sessions": len(this_week), "last_week": len(last_week), "days": days,
+                 "today_idx": now.weekday()},
+        "exercises": exercises,
+    }
+
+
+def exercise_detail(rows: list[dict], aliases: dict[str, str], name: str, now: datetime) -> Optional[dict]:
+    """Detail-sheet payload for one canonical exercise, or None if unknown."""
+    ex_rows = [r for r in rows if resolve_exercise(r, aliases) == name]
+    names = sorted(canonical_names(rows, aliases))
+    if not ex_rows and name not in names:
+        return None
+    alias_keys = sorted(k for k, v in aliases.items() if v == name)
+    base = {"name": name, "today": now.strftime("%Y-%m-%d"), "aliases": alias_keys, "exercises": names}
+    if not ex_rows:
+        return {**base, "kind": "bodyweight", "assisted": False, "big": {"value": "—", "unit": ""},
+                "pr": None, "pr_date": None, "last_sets": [], "last_date": None, "n_sessions": 0,
+                "series": [], "working": None, "history": [], "first_date": None}
+
+    c = _ex_common(name, ex_rows)
+    sessions = c["sessions"]
+    latest = sessions[-1]
+    history = []
+    for s in reversed(sessions[-HISTORY_SESSIONS:]):
+        top_row = s["top"]
+        history.append({"date": s["date"], "pr": s["pr"],
+                        "sets": [_ui_set(r, s["pr"] and r is top_row) for r in s["rows"]]})
+    return {
+        **base,
+        "kind": c["kind"], "assisted": c["assisted"], "big": c["big"],
+        "working": c["working"],
+        "pr": _top_label(c["best"]["top"]), "pr_date": c["best"]["date"],
+        "last_date": latest["date"], "n_sessions": len(sessions),
+        "first_date": sessions[0]["date"],
+        "series": [{"date": s["date"], "value": s["value"], "label": _top_label(s["top"]), "pr": s["pr"]}
+                   for s in sessions[-DETAIL_SESSIONS:]],
+        "history": history,
+    }
+
+
+def rename_keys(rows: list[dict], aliases: dict[str, str], old: str, new: str) -> dict[str, str]:
+    """Alias keys to re-point when an exercise is renamed (or merged into another).
+
+    Covers every alias that maps to `old`, every raw phrase of rows that resolve
+    to `old` (so rows whose alias line was deleted still follow), and the new
+    name's own key so typing it directly resolves.
+    """
+    keys = {k for k, v in aliases.items() if v == old}
+    keys |= {alias_key(r["raw"]) for r in rows if resolve_exercise(r, aliases) == old}
+    keys.add(alias_key(old))
+    keys.add(alias_key(new))
+    return {k: new for k in keys if k}
+
+
 def build_snapshot(rows: list[dict], aliases: dict[str, str], now: datetime) -> str:
     """Compact per-exercise block injected into the prompt on workout turns."""
     stats = exercise_stats(rows, aliases, now)

@@ -331,6 +331,83 @@ def test_workouts_today_refreshes_after_new_log(env):
 
 
 # ---------------------------------------------------------------------------
+# Train tab endpoints + in-app alias editing
+# ---------------------------------------------------------------------------
+
+def log_two_exercises(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    wrong = {"workout_action": "log", "entries": [
+        {"exercise": "Lat Pulldown", "raw": "cable pulldown", "sets": [{"weight": 80, "reps": 10, "count": 3}]}]}
+    chat(client, state, "cable pulldown 80x10x3", "ok" + directive(wrong))
+    return sh, client
+
+
+def test_summary_and_detail_endpoints(env):
+    sh, state, client = env
+    chat(client, state, "lat pulldowns 100x8x3", "ok" + directive(LOG_PULLDOWN))
+    s = client.get("/api/workouts/summary").json()
+    assert s["week"]["sessions"] == 1
+    assert [e["name"] for e in s["exercises"]] == ["Lat Pulldown"]
+    d = client.get("/api/workouts/exercise", params={"name": "Lat Pulldown"}).json()
+    assert d["n_sessions"] == 1 and d["aliases"] == ["lat pulldown", "lat pulldowns"]
+    assert client.get("/api/workouts/exercise", params={"name": "Nope"}).status_code == 404
+
+
+def test_summary_empty(env):
+    sh, state, client = env
+    s = client.get("/api/workouts/summary").json()
+    assert s["exercises"] == [] and s["week"]["sessions"] == 0
+
+
+def test_remap_endpoint_moves_past_logs(env):
+    sh, client = log_two_exercises(env)
+    r = client.post("/api/workouts/remap", json={"alias": "cable pulldown", "exercise": "Cable Pulldown"})
+    assert r.status_code == 200 and r.json()["exercise"] == "Cable Pulldown"
+    names = [e["name"] for e in client.get("/api/workouts/summary").json()["exercises"]]
+    assert sorted(names) == ["Cable Pulldown", "Lat Pulldown"]
+    d = client.get("/api/workouts/exercise", params={"name": "Cable Pulldown"}).json()
+    assert d["series"][0]["label"] == "80×10"                        # the earlier log followed the remap
+    keys = [r[0] for r in sh.tabs[WS_EXERCISE_ALIASES].rows[1:]]
+    assert keys.count("cable pulldown") == 1                          # re-pointed in place
+
+
+def test_rename_endpoint_renames_everything(env):
+    sh, client = log_two_exercises(env)
+    r = client.post("/api/workouts/rename", json={"exercise": "Lat Pulldown", "new_name": "Wide Pulldown"})
+    assert r.status_code == 200
+    names = {e["name"] for e in client.get("/api/workouts/summary").json()["exercises"]}
+    assert names == {"Wide Pulldown"}                                  # both phrases followed
+    d = client.get("/api/workouts/exercise", params={"name": "Wide Pulldown"}).json()
+    assert d["n_sessions"] == 1 and "cable pulldown" in d["aliases"]    # same session, merged top set
+    # New logs under the old phrase now land on the new name
+    chat(client, env[1], "lat pulldowns 110x6", "ok" + directive({"workout_action": "log", "entries": [
+        {"exercise": "Lat Pulldown", "raw": "lat pulldowns", "sets": [{"weight": 110, "reps": 6}]}]}))
+    assert sh.tabs[WS_WORKOUT_LOGS].rows[-1][3] == "Wide Pulldown"
+
+
+def test_rename_merges_into_existing_exercise(env):
+    sh, client = log_two_exercises(env)
+    client.post("/api/workouts/remap", json={"alias": "cable pulldown", "exercise": "Cable Pulldown"})
+    r = client.post("/api/workouts/rename", json={"exercise": "Cable Pulldown", "new_name": "Lat Pulldown"})
+    assert r.status_code == 200
+    names = {e["name"] for e in client.get("/api/workouts/summary").json()["exercises"]}
+    assert names == {"Lat Pulldown"}
+
+
+def test_edit_endpoint_validation(env):
+    sh, client = log_two_exercises(env)
+    assert client.post("/api/workouts/remap", json={"alias": "123", "exercise": "X"}).status_code == 400
+    assert client.post("/api/workouts/remap", json={"alias": "cable pulldown", "exercise": "  "}).status_code == 400
+    assert client.post("/api/workouts/remap",
+                       json={"alias": "cable pulldown", "exercise": "x" * 61}).status_code == 400
+    assert client.post("/api/workouts/rename",
+                       json={"exercise": "Lat Pulldown", "new_name": "Lat Pulldown"}).status_code == 400
+    assert client.post("/api/workouts/rename",
+                       json={"exercise": "Nope", "new_name": "Something"}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Remap
 # ---------------------------------------------------------------------------
 

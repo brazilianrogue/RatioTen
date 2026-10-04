@@ -1682,6 +1682,94 @@ async def workouts_today(user_id: str = Query(DEFAULT_USER)):
     return {"session": workouts.session_summary(rows, aliases, now), "markers": markers}
 
 
+def _workout_rows_and_aliases(uid: str):
+    values  = _cached(f"workout_values_{uid}", 600, lambda: _read_workout_values(uid), empty_ttl=30)
+    aliases = _cached(f"exercise_aliases_{uid}", 600, lambda: _read_exercise_aliases(uid), empty_ttl=30)
+    return (workouts.parse_rows(values) if values else []), aliases
+
+
+@app.get("/api/workouts/summary")
+async def workouts_summary(user_id: str = Query(DEFAULT_USER)):
+    """Train tab: this week's sessions + one card per exercise."""
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    rows, aliases = _workout_rows_and_aliases(uid)
+    return workouts.train_summary(rows, aliases, datetime.now(EASTERN).replace(tzinfo=None))
+
+
+@app.get("/api/workouts/exercise")
+async def workouts_exercise(name: str = Query(...), user_id: str = Query(DEFAULT_USER)):
+    """Exercise detail sheet: chart series, history, PRs, aliases."""
+    uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER
+    rows, aliases = _workout_rows_and_aliases(uid)
+    detail = workouts.exercise_detail(rows, aliases, name, datetime.now(EASTERN).replace(tzinfo=None))
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Unknown exercise")
+    return detail
+
+
+class RemapRequest(BaseModel):
+    alias: str
+    exercise: str
+    user_id: str = DEFAULT_USER
+
+
+class RenameRequest(BaseModel):
+    exercise: str
+    new_name: str
+    user_id: str = DEFAULT_USER
+
+
+_MAX_EXERCISE_NAME = 60
+
+
+def _clean_exercise_name(raw: str) -> str:
+    name = re.sub(r"\s+", " ", str(raw or "")).strip()
+    if not name or len(name) > _MAX_EXERCISE_NAME or not workouts.alias_key(name):
+        raise HTTPException(status_code=400, detail="Enter an exercise name (up to 60 characters).")
+    return name
+
+
+@app.post("/api/workouts/remap")
+async def workouts_remap(req: RemapRequest):
+    """Point one phrase at a different exercise.  Retroactive: every past row
+    typed that way follows (identity is resolved at read time)."""
+    uid = req.user_id if req.user_id in USER_CONFIGS else DEFAULT_USER
+    key = workouts.alias_key(req.alias)
+    if not key:
+        raise HTTPException(status_code=400, detail="That phrase can't be used as an alias.")
+    exercise = _clean_exercise_name(req.exercise)
+    try:
+        _write_alias_remaps(_get_sh(uid), {key: exercise}, datetime.now(EASTERN).strftime("%Y-%m-%d"), uid)
+    except Exception as e:
+        log.error("workouts_remap failed: %s", e)
+        raise HTTPException(status_code=500, detail="Couldn't save the change. Try again.")
+    return {"ok": True, "exercise": exercise}
+
+
+@app.post("/api/workouts/rename")
+async def workouts_rename(req: RenameRequest):
+    """Rename an exercise (or merge it into an existing one) — all its phrases follow."""
+    uid = req.user_id if req.user_id in USER_CONFIGS else DEFAULT_USER
+    new_name = _clean_exercise_name(req.new_name)
+    old = str(req.exercise or "").strip()
+    if new_name == old:
+        raise HTTPException(status_code=400, detail="That's already the name.")
+    try:
+        # Fresh reads: a rename must see every phrase, not a cached copy.
+        rows = workouts.parse_rows(_read_workout_values(uid))
+        aliases = _read_exercise_aliases(uid)
+        if old not in workouts.canonical_names(rows, aliases):
+            raise HTTPException(status_code=404, detail="Unknown exercise")
+        pairs = workouts.rename_keys(rows, aliases, old, new_name)
+        _write_alias_remaps(_get_sh(uid), pairs, datetime.now(EASTERN).strftime("%Y-%m-%d"), uid)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("workouts_rename failed: %s", e)
+        raise HTTPException(status_code=500, detail="Couldn't save the change. Try again.")
+    return {"ok": True, "exercise": new_name}
+
+
 @app.get("/api/chat/history")
 async def chat_history(user_id: str = Query(DEFAULT_USER)):
     uid = user_id if user_id in USER_CONFIGS else DEFAULT_USER

@@ -365,6 +365,83 @@ def test_session_markers():
 
 
 # ---------------------------------------------------------------------------
+# Train tab: summary, detail, rename
+# ---------------------------------------------------------------------------
+
+def train_rows():
+    # NOW = Fri 2026-10-02 18:00.  Week starts Mon 09-28.
+    return w.parse_rows(sheet([
+        (ts(30), "S-0", "E-0", "Lat Pulldown", "lat pulldowns", 80, 10, "", 3),
+        (ts(9), "S-1", "E-1", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3),
+        (ts(2), "S-2", "E-2", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3),          # Wed 09-30
+        (ts(2, minute=20), "S-2", "E-3", "Assisted Dip", "assisted dips", -55, 8, "", 3),
+        (ts(2, minute=30), "S-2", "E-4", "Dead Hang", "dead hang", "", "", 40, 1),
+        (today_at(17, 0), "S-3", "E-5", "Lat Pulldown", "lat pulldowns", 110, 6, "", 1),  # Fri 10-02
+        (today_at(17, 10), "S-3", "E-6", "Assisted Dip", "assisted dips", -45, 8, "", 1),
+        (ts(10), "S-9", "E-9", "Push-up", "pushups", "", 20, "", 4),                       # last week
+    ]))
+
+
+def test_train_week_strip():
+    s = w.train_summary(train_rows(), {}, NOW)
+    wk = s["week"]
+    assert s["today"] == "2026-10-02"
+    assert wk["sessions"] == 2 and wk["today_idx"] == 4          # Wed + Fri sessions
+    assert wk["days"] == [False, False, True, False, True, False, False]
+    assert wk["last_week"] == 2                                    # Sep 22 push-ups + Sep 23 pulldowns
+
+
+def test_train_exercise_cards():
+    ex = {e["name"]: e for e in w.train_summary(train_rows(), {}, NOW)["exercises"]}
+    lat = ex["Lat Pulldown"]
+    assert lat["big"] == {"value": "103.3", "unit": "lb working"}   # tops 100, 100, 110 (last 3 sessions)
+    assert lat["pr"] == "110×6" and lat["pr_date"] == "2026-10-02"
+    assert lat["last"] == "110×6" and lat["spark"] == [80, 100, 100, 110]
+    dip = ex["Assisted Dip"]
+    assert dip["assisted"] is True and dip["big"] == {"value": "50", "unit": "lb assist"}
+    assert dip["pr"] == "45 assist ×8" and dip["spark"] == [-55, -45]    # up = less assistance
+    assert ex["Dead Hang"]["big"] == {"value": "40s", "unit": "best"}
+    assert ex["Push-up"]["big"] == {"value": "20", "unit": "reps best"}
+
+
+def test_train_exercise_order_is_most_recent_first():
+    names = [e["name"] for e in w.train_summary(train_rows(), {}, NOW)["exercises"]]
+    assert names[:2] == ["Assisted Dip", "Lat Pulldown"]            # 17:10 then 17:00 today
+    assert names[-1] == "Push-up"
+
+
+def test_exercise_detail_series_history_and_pr_flags():
+    d = w.exercise_detail(train_rows(), {"lat pulldowns": "Lat Pulldown", "pulldown": "Lat Pulldown"},
+                          "Lat Pulldown", NOW)
+    assert d["n_sessions"] == 4 and d["first_date"] == "2026-09-02"
+    assert [p["value"] for p in d["series"]] == [80, 100, 100, 110]
+    assert [p["pr"] for p in d["series"]] == [False, True, False, True]
+    assert d["history"][0]["date"] == "2026-10-02" and d["history"][0]["pr"] is True
+    assert d["history"][0]["sets"] == [{"label": "110×6", "count": 1, "pr": True}]
+    assert d["history"][1]["sets"] == [{"label": "100×8", "count": 3, "pr": False}]
+    assert d["aliases"] == ["lat pulldowns", "pulldown"]
+    assert "Assisted Dip" in d["exercises"]
+    assert d["working"] == pytest.approx((100 + 100 + 110) / 3)
+
+
+def test_exercise_detail_unknown_and_alias_only():
+    assert w.exercise_detail(train_rows(), {}, "Nope", NOW) is None
+    d = w.exercise_detail([], {"face pulls": "Face Pull"}, "Face Pull", NOW)   # aliased, no sets yet
+    assert d["n_sessions"] == 0 and d["series"] == [] and d["aliases"] == ["face pulls"]
+
+
+def test_rename_keys_cover_aliases_rows_and_new_name():
+    rows = w.parse_rows(sheet([
+        (ts(3), "S-1", "E-1", "Lat Pulldown", "lat pulldowns", 100, 8, "", 3),
+        (ts(2), "S-2", "E-2", "Lat Pulldown", "wide pulldown", 90, 8, "", 3),   # no alias line for this one
+    ]))
+    aliases = {"lat pulldowns": "Lat Pulldown", "pulldown": "Lat Pulldown", "squat": "Squat"}
+    pairs = w.rename_keys(rows, aliases, "Lat Pulldown", "Wide Pulldown")
+    assert pairs == {"lat pulldowns": "Wide Pulldown", "pulldown": "Wide Pulldown",
+                     "wide pulldown": "Wide Pulldown", "lat pulldown": "Wide Pulldown"}
+
+
+# ---------------------------------------------------------------------------
 # Intent detection
 # ---------------------------------------------------------------------------
 
